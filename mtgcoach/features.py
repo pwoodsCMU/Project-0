@@ -12,8 +12,9 @@ import re
 import statistics
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
+from . import synergy as synergy_mod
 from .roles import AXIS_ROLES, ROLES, ROLES_BY_KEY, card_roles, is_land
-from .scryfall import normalize_name
+from .scryfall import cosmetic_labels, normalize_name
 
 COLORS = ["W", "U", "B", "R", "G"]
 COLOR_NAMES = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green"}
@@ -111,10 +112,12 @@ BASIC_LAND_RE = re.compile(r"^\s*(Basic )?(Snow )?Land\b", re.IGNORECASE)
 class CardEntry(object):
     """One decklist line, resolved against Scryfall."""
 
-    __slots__ = ("name", "quantity", "card", "tags", "roles", "is_commander")
+    __slots__ = ("name", "quantity", "card", "tags", "roles", "is_commander",
+                 "synergy")
 
     def __init__(self, name: str, quantity: int, card: dict,
                  tags: Sequence[str], roles: Set[str], is_commander: bool):
+        self.synergy = 0.0
         self.name = name
         self.quantity = quantity
         self.card = card
@@ -182,6 +185,7 @@ class DeckAnalysis(object):
         self.commander_notes: List[str] = []
         self.commander_curve_allowance = 0.0
         self.commander_wants_high_curve = False
+        self.themes: List = []
 
     def effective_avg_mv(self) -> float:
         """Average mana value, discounted for what the commander makes cheaper."""
@@ -368,9 +372,17 @@ def analyze(parsed_deck, cards: Dict[str, dict], tag_index: Dict[str, List[str]]
 
     _dominant_creature_type(an)
     _commander_effects(an)
+    _deck_themes(an, tag_index)
     an.vector = build_vector(an)
     an.legality = check_legality(an, parsed_deck)
     return an
+
+
+def _deck_themes(an: DeckAnalysis, tag_index: Dict[str, List[str]]) -> None:
+    """Discover what this deck is built around, and score every card on it."""
+    an.themes = synergy_mod.deck_themes(an, tag_index, cosmetic_labels())
+    for entry in an.entries:
+        entry.synergy = synergy_mod.card_synergy(entry, an.themes)
 
 
 def _commander_effects(an: DeckAnalysis) -> None:

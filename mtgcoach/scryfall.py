@@ -47,6 +47,23 @@ TAGS_MAX_AGE_DAYS = 14
 # without the new data.
 CARD_CACHE_SCHEMA = 2
 
+# Same idea for the tag index, which now carries the cosmetic-label set too.
+TAG_CACHE_SCHEMA = 2
+
+# Tag families that describe a card's printing or flavour rather than what it
+# does: reprint cycles, alliterative names, vanilla-ness, draft signposts.
+# Their descendants are excluded from theme detection, where they would
+# otherwise dominate - "cycle-ecc-incarnation" appears in five cards of one
+# deck and almost nowhere else, which looks like a very strong theme and means
+# nothing.
+COSMETIC_TAG_ROOTS = [
+    "cycle", "card names", "flavors of vanilla", "draft signpost",
+    "staple with set's mechanic", "un-design", "meme", "vanity card",
+    "invitational card", "guest designer", "great-designer-search-3",
+    "playtest forecast", "helper card", "paper-compatible",
+    "digital to paper", "potentially black border", "unique type line",
+]
+
 
 class ScryfallError(RuntimeError):
     pass
@@ -321,16 +338,42 @@ def _ancestor_labels(tags: List[dict]) -> Dict[str, Set[str]]:
     return {by_id[tid]["label"]: walk(tid, set()) for tid in by_id}
 
 
+_tag_cache_memo: Dict[str, dict] = {}
+
+
+def _load_tag_cache(path: str):
+    if path in _tag_cache_memo:
+        return _tag_cache_memo[path]
+    cached = _read_json(path)
+    if isinstance(cached, dict) and cached.get("schema") == TAG_CACHE_SCHEMA:
+        _tag_cache_memo[path] = cached
+        return cached
+    return None
+
+
 def oracle_tag_index(offline: bool = False, refresh: bool = False,
                      progress=None) -> Dict[str, List[str]]:
     """``oracle_id -> [tag labels, flattened up the tag hierarchy]``."""
+    return _tag_cache(offline, refresh, progress)["index"]
+
+
+def cosmetic_labels(offline: bool = True, progress=None) -> Set[str]:
+    """Tags that describe a printing rather than what a card does."""
+    try:
+        return set(_tag_cache(offline, False, progress).get("cosmetic") or [])
+    except OfflineError:
+        return set()
+
+
+def _tag_cache(offline: bool = False, refresh: bool = False,
+               progress=None) -> dict:
     index_file = _cache_path("oracle_tags_index.json.gz")
     if not refresh and _age_days(index_file) < TAGS_MAX_AGE_DAYS:
-        cached = _read_json(index_file)
+        cached = _load_tag_cache(index_file)
         if cached:
             return cached
     if offline:
-        cached = _read_json(index_file)
+        cached = _load_tag_cache(index_file)
         if cached:
             return cached
         raise OfflineError("no cached oracle tag index and --offline was requested")
@@ -349,9 +392,16 @@ def oracle_tag_index(offline: bool = False, refresh: bool = False,
             if oid:
                 index.setdefault(oid, set()).update(labels)
 
-    flat = {oid: sorted(labels) for oid, labels in index.items()}
-    _write_json(index_file, flat)
-    return flat
+    roots = set(COSMETIC_TAG_ROOTS)
+    cosmetic = sorted(label for label, ancestors in closure.items()
+                      if ancestors & roots
+                      or label.endswith("-storyline-in-cards"))
+
+    payload = {"schema": TAG_CACHE_SCHEMA,
+               "index": {oid: sorted(labels) for oid, labels in index.items()},
+               "cosmetic": cosmetic}
+    _write_json(index_file, payload)
+    return payload
 
 
 def tag_vocabulary(offline: bool = False) -> Dict[str, dict]:

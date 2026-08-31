@@ -11,7 +11,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mtgcoach import (advice, archetypes, classify, decklist, features, roles,
-                      scryfall)
+                      scryfall, synergy)
 from mtgcoach.scryfall import normalize_name
 
 
@@ -887,6 +887,95 @@ class TestHighCurveCommanders(unittest.TestCase):
         titles = [r.title for r in advice.fundamentals(an)]
         self.assertNotIn("Lower your curve", titles)
         self.assertNotIn("Add more early plays", titles)
+
+
+class TestSynergyThemes(unittest.TestCase):
+    """Themes are discovered from tag concentration, not from a fixed list."""
+
+    def _universe(self, rare_carriers=2, common_carriers=800):
+        # 1000 cards in "Magic": a rare tag on a couple, a common one on most.
+        index = {}
+        for i in range(1000):
+            labels = ["filler"]
+            if i < rare_carriers:
+                labels.append("x cost matters")
+            if i < common_carriers:
+                labels.append("everywhere")
+            index["oid-universe-%d" % i] = labels
+        return index
+
+    def _deck(self, deck_tags):
+        cards_list = [card("Plains", cost="", mv=0.0,
+                           type_line="Basic Land — Plains"),
+                      card("Boss", type_line="Legendary Creature — Human")]
+        lines = ""
+        tags = {}
+        for i, labels in enumerate(deck_tags):
+            name = "Spell %d" % i
+            cards_list.append(card(name, cost="{2}", mv=2.0, type_line="Sorcery"))
+            tags["oid-spell-%d" % i] = labels
+            lines += "1 %s\n" % name
+        text = "// Commander\n1 Boss\n\n// Deck\n%s36 Plains\n" % lines
+        parsed, cards, _ = build(cards_list, text)
+        return parsed, cards, tags
+
+    def test_a_concentrated_tag_becomes_a_theme(self):
+        parsed, cards, deck_tags = self._deck(
+            [["x cost matters"]] * 6 + [["everywhere"]] * 6)
+        index = self._universe()
+        index.update(deck_tags)
+        an = features.analyze(parsed, cards, index)
+        themes = synergy.deck_themes(an, index)
+        labels = [t.label for t in themes]
+        self.assertIn("x cost matters", labels)
+        # A tag most of Magic carries is not what this deck is "about".
+        self.assertNotIn("everywhere", labels)
+        self.assertEqual(themes[0].label, "x cost matters")
+        self.assertGreater(themes[0].lift, 50)
+
+    def test_cosmetic_tags_are_never_themes(self):
+        parsed, cards, deck_tags = self._deck([["cycle-xyz-something"]] * 6)
+        index = {"oid-universe-0": ["cycle-xyz-something"]}
+        index.update(deck_tags)
+        an = features.analyze(parsed, cards, index)
+        themes = synergy.deck_themes(an, index,
+                                     cosmetic={"cycle-xyz-something"})
+        self.assertEqual(themes, [])
+
+    def test_a_tag_on_one_card_is_a_coincidence_not_a_theme(self):
+        parsed, cards, deck_tags = self._deck([["x cost matters"]]
+                                              + [["filler"]] * 8)
+        index = self._universe()
+        index.update(deck_tags)
+        an = features.analyze(parsed, cards, index)
+        themes = synergy.deck_themes(an, index)
+        self.assertNotIn("x cost matters", [t.label for t in themes])
+
+    def test_card_synergy_reflects_the_themes_a_card_carries(self):
+        parsed, cards, deck_tags = self._deck([["x cost matters"]] * 6
+                                              + [["unrelated-thing"]])
+        index = self._universe()
+        index.update(deck_tags)
+        an = features.analyze(parsed, cards, index)
+        themes = synergy.deck_themes(an, index)
+        on_theme = next(e for e in an.entries if e.name == "Spell 0")
+        off_theme = next(e for e in an.entries if e.name == "Spell 6")
+        self.assertGreater(synergy.card_synergy(on_theme, themes), 0.9)
+        self.assertEqual(synergy.card_synergy(off_theme, themes), 0.0)
+
+    def test_a_roleless_card_carrying_the_theme_is_not_a_cut(self):
+        # The Unbound Flourishing case: no role in the fixed vocabulary, but
+        # it is what the deck is built on.
+        parsed, cards, deck_tags = self._deck([["x cost matters"]] * 8)
+        index = self._universe()
+        index.update(deck_tags)
+        an = features.analyze(parsed, cards, index)
+        payoff = next(e for e in an.entries if e.name == "Spell 0")
+        self.assertEqual(payoff.roles, set())        # invisible to roles
+        self.assertGreater(payoff.synergy, 0.9)      # visible to synergy
+        result = classify.classify(an.vector)
+        names = [c.name for c in advice.cut_candidates(an, result, limit=99)]
+        self.assertNotIn("Spell 0", names)
 
 
 class TestEndToEnd(unittest.TestCase):

@@ -187,6 +187,21 @@ def render(analysis: DeckAnalysis, classification: Classification,
                "spells)" % analysis.nonland_count))
     add("")
 
+    # ---- discovered themes ----------------------------------------------- #
+    if analysis.themes:
+        add(_rule("WHAT THIS DECK IS BUILT AROUND", st))
+        for line in wrap("Tags this deck carries far more often than an average "
+                         "deck would. These are found in your cards, not chosen "
+                         "from a list, so they catch themes the role vocabulary "
+                         "above has no name for.", indent=2):
+            add(st.dim(line))
+        add("")
+        for theme in analysis.themes[:8]:
+            add("  %-30s %2d cards  %5s more concentrated than usual"
+                % (theme.label[:30], theme.cards,
+                   "%.0fx" % theme.lift if theme.lift < 1000 else ">999x"))
+        add("")
+
     # ---- archetypes ------------------------------------------------------ #
     add(_rule("ARCHETYPE DISTANCE", st))
     add(st.dim("  affinity = share of the deck's identity; fit = how close the "
@@ -372,6 +387,7 @@ def to_json(analysis: DeckAnalysis, classification: Classification,
                   for key, count in sorted(analysis.role_counts.items())
                   if count},
         "feature_vector": {k: round(v, 4) for k, v in analysis.vector.items()},
+        "themes": [t.as_dict() for t in analysis.themes],
         "classification": {
             "focus": round(classification.focus, 4),
             "separation": round(classification.separation, 4),

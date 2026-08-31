@@ -109,6 +109,41 @@ or six payoffs and no Elementals, and those need different advice.
 `mtgcoach roles` prints the whole vocabulary; `mtgcoach card "Beast Within"`
 shows how a single card was read.
 
+### Discovered themes
+
+The role vocabulary is a fixed list of about thirty things a card can do. It
+is a good basis for comparing decks *to each other*, but it can only see
+themes somebody named in advance. Unbound Flourishing carries `x cost matters`
+and nothing the vocabulary knows, so in a deck that is half {X} spells it read
+as a card that does nothing - and got proposed as a cut.
+
+So the deck also describes itself. For every Scryfall tag, `synergy.py`
+compares how concentrated it is *in this deck* against how common it is across
+all 36,000 tagged cards:
+
+```
+lift(tag) = share of this deck carrying it / share of all cards carrying it
+```
+
+A tag with high lift is something the deck is doing on purpose. `x cost
+matters` appears in about one card in a thousand overall and in eight of the
+Quandrix deck's sixty spells - a lift near 200 - so the central theme is found
+without anyone having predicted it. Across the sample decks this surfaces
+`synergy-food`, `group hug`, `typal-elemental`, `synergy-equipment` and
+`counterspell` as the top theme of the deck built on each.
+
+A theme needs at least 3 cards and 2x lift, so a single card is a coincidence
+rather than a plan. Tags describing a card's printing rather than its function
+- reprint cycles, alliterative names, vanilla-ness - are excluded by walking
+the tag hierarchy down from a set of cosmetic roots; without that,
+`cycle-ecc-incarnation` (five cards in one deck, almost nowhere else) looks
+like the strongest theme in the format.
+
+A card's **synergy score** is how much of the deck's theme weight it carries.
+It is used to protect cards the role vocabulary is blind to, and it is
+deck-relative by construction: Sol Ring scores 0.88 in a ramp deck and 0.00 in
+Voltron, which is the honest answer to "is this card doing something *here*".
+
 ### Feature vector
 
 28 dimensions: 20 role densities plus 8 shape features (creature-type
@@ -261,6 +296,8 @@ tiers, because "cut this" means three quite different things:
 Within every tier the most expensive card goes first. Three rules keep this
 from producing absurd advice:
 
+- **Cards carrying the deck's own themes are protected**, even when they fill
+  no named role - see *Discovered themes* above.
 - **Format staples are never pointed at.** Scryfall carries `edhrec_rank`, a
   measure of how widely a card is played in Commander: Sol Ring is 1, Arcane
   Signet 3, Cultivate 20, Farewell 169, against 10421 for Colossal Dreadmaw.
@@ -301,6 +338,9 @@ list never runs longer than the number of slots the advice actually needs.
   ten bad draw spells and ten good ones look identical here. The cut list
   softens this with EDHREC rank, but rank measures popularity, not power, and
   a card can be both unpopular and exactly right for your deck.
+- Theme discovery finds *correlation in tags*, not the actual combo. It can
+  tell that a deck is built on {X} spells; it cannot tell that two particular
+  cards win on the spot together.
 - The tool sees a decklist, not a play pattern. It cannot see that two cards
   combo, that the mana base's untapped ratio is wrong, or that the deck is
   simply too strong or too weak for its table.
@@ -311,13 +351,13 @@ list never runs longer than the number of slots the advice actually needs.
 python3 -m unittest discover -s tests -v
 ```
 
-71 tests: parsing, split-card identifiers, partner pairing and inference, role
-assignment, creature-type concentration, {X} spell costing, commander
-weighting, curve allowance, high-curve commanders and commander-driven plan
-shape, feature maths, legality checks, distance and mixture properties, blend
-gating, cut-candidate tiers, staple protection, advice guards, plus an
-end-to-end check that each sample deck classifies as intended (skipped if the
-Scryfall cache is empty).
+76 tests: parsing, split-card identifiers, partner pairing and inference, role
+assignment, creature-type concentration, theme discovery by tag lift, {X}
+spell costing, commander weighting, curve allowance, high-curve commanders and
+commander-driven plan shape, feature maths, legality checks, distance and
+mixture properties, blend gating, cut-candidate tiers, staple protection,
+advice guards, plus an end-to-end check that each sample deck classifies as
+intended (skipped if the Scryfall cache is empty).
 
 ## Layout
 
@@ -327,6 +367,7 @@ mtgcoach/
   decklist.py    decklist parsing and commander detection
   roles.py       the functional role vocabulary and its matching rules
   features.py    descriptive statistics, feature vector, legality checks
+  synergy.py     deck-relative theme discovery by tag lift
   archetypes.py  the thirteen reference profiles
   classify.py    distance, softmax mixture, focus, blended target
   advice.py      fundamentals and direction recommendation passes

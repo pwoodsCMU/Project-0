@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from . import synergy as synergy_mod
 from .archetypes import Archetype
 from .classify import Classification, blend_matches, blended_target
 from .features import (COLOR_NAMES, DeckAnalysis, FEATURE_NAMES,
@@ -798,14 +799,19 @@ def cut_candidates(analysis: DeckAnalysis, classification: Classification,
         protected = bool((roles & UNIVERSAL_ROLES) - set(oversupplied))
         rank = entry.edhrec_rank
         staple = rank is not None and rank <= STAPLE_RANK
+        # The role vocabulary cannot see every theme. A card carrying the
+        # deck's own discovered themes is doing something for the deck even
+        # when it fills no named role at all.
+        synergistic = entry.synergy >= synergy_mod.SYNERGY_THRESHOLD
 
-        if not roles and _tribe_credit(entry, analysis, wanted) == 0:
+        if (not roles and not synergistic
+                and _tribe_credit(entry, analysis, wanted) == 0):
             dead.append(CutCandidate(
                 entry.name, entry.quantity, entry.mana_value,
                 "does nothing the rest of the deck can build on",
                 sorted(roles), "dead", rank))
-        elif protected or staple:
-            continue          # earns its slot in any deck, or is a staple
+        elif protected or staple or entry.synergy >= 0.5:
+            continue          # earns its slot, is a staple, or is core to the plan
         elif roles and roles <= set(oversupplied):
             redundant.append(CutCandidate(
                 entry.name, entry.quantity, entry.mana_value,
@@ -814,7 +820,7 @@ def cut_candidates(analysis: DeckAnalysis, classification: Classification,
                 % _join(sorted(ROLES_BY_KEY[r].label.lower()
                                for r in roles if r in ROLES_BY_KEY)),
                 sorted(roles), "redundant", rank))
-        elif on_plan == 0 and shape == 0:
+        elif on_plan == 0 and shape == 0 and not synergistic:
             off_plan.append(CutCandidate(
                 entry.name, entry.quantity, entry.mana_value,
                 "nothing it does serves your %s plan" % plan_name,
