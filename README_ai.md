@@ -4,3 +4,4 @@ AI Use So far:
 3. Created initial backend model with Claude Code, using Opus 5. 
 4. Modifed backend model, testing with a variety of precons and known decks. Using Opus 5.
 5. Repeated 4, with additional feedback and testing with various decks through development process. Using Opus 5. 
+6. Moved towards tests against known precon tests, to detrmine whether the expected cuts are being made.
