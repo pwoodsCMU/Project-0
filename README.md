@@ -117,11 +117,33 @@ share, normalised average mana value, cheap-spell share, top-end share, land
 share). Role densities are expressed as a share of the deck's **nonland**
 cards, so decks of slightly different shapes stay comparable.
 
+**{X} spells are counted at a realistic cost.** Scryfall reports `{X}` as
+zero, which makes Fireball a one-drop and Walking Ballista a zero-drop. Nobody
+casts them for X=0, so each `{X}` adds two to the mana value used for the
+curve - otherwise a deck full of mana sinks looks like it has a superb early
+game and gets told the opposite of what it needs.
+
 **Creature-type concentration** is the share of creatures sharing the deck's
 dominant type. Changelings count as whatever the tribe turns out to be, and
 when the commander is a creature - or carries a `typal-<type>` tag - its own
 type gets first refusal on near-ties, so an Elemental commander means the deck
 is measured on Elementals.
+
+**The commander sets the plan.** Whatever it does is on-plan by definition,
+and is never proposed as a trim. That extends to shape: a commander that cares
+about artifacts or enchantments means the deck wants noncreature permanents, a
+typal commander means it wants creature-type concentration. Those are not
+roles any card carries, so without the mapping in
+`advice.COMMANDER_SHAPE_IMPLICATIONS` an artifact commander's deck gets told to
+trim the artifacts it is built on. Shape features that pull against each other
+are blocked in the same pass, so a deck built on permanents is not nudged
+toward instants and sorceries.
+
+**A commander can license a high curve.** Bello, Bard of the Brambles animates
+artifacts and enchantments of mana value 4 or greater; Scryfall tags that as
+`high mana value matters`. When the commander pays you for expensive cards,
+the expensive cards are the plan, and the curve advice steps aside rather than
+telling the player to undo their own deck.
 
 **The commander is weighted up.** It is castable in every single game, so it
 says more about the deck than any one of the other 99 cards; role densities
@@ -182,8 +204,14 @@ Two independent passes, merged and sorted by priority:
 **Fundamentals** use absolute targets and ignore archetype: land count against
 a curve-aware target (adjusted for cheap ramp, MDFC land backs, and the
 archetype's own appetite for lands), total mana sources, coloured sources
-against coloured pips, card draw, interaction, board wipes, curve, and format
-legality (100 cards, singleton, colour identity, commander eligibility).
+against coloured pips, card draw, interaction (10-14 answers, of which 6-10
+targeted - board wipes do not answer the resolved permanent already killing
+you), board wipes, curve, and format legality (100 cards, singleton, colour
+identity, commander eligibility, partner pairing).
+
+The early-play check is ramp-aware: a deck with a dozen cheap mana rocks is
+doing something on turns one to three even when few of its spells are cheap,
+so the bar comes down rather than telling a ramp deck to become an aggro one.
 
 Curve advice reads the commander first. A commander that discounts or caps
 casting costs, casts things for free, or puts permanents onto the battlefield
@@ -233,12 +261,21 @@ tiers, because "cut this" means three quite different things:
 Within every tier the most expensive card goes first. Three rules keep this
 from producing absurd advice:
 
+- **Format staples are never pointed at.** Scryfall carries `edhrec_rank`, a
+  measure of how widely a card is played in Commander: Sol Ring is 1, Arcane
+  Signet 3, Cultivate 20, Farewell 169, against 10421 for Colossal Dreadmaw.
+  Anything inside the top 600 is a staple, and "you have one board wipe too
+  many" is a bad reason to cut the best board wipe ever printed. Staples can
+  still be trimmed at the role level; they are just never the card the tool
+  names.
 - **Universally useful cards are protected.** Ramp, draw, removal, tutors and
   protection earn their slot in any deck. Without this a synergy score
   cheerfully recommends cutting Sol Ring for being off-theme. They become
   cuttable only once the deck is past what *any* deck wants - not merely past
   what one archetype prefers, or a five-colour deck gets told to cut Cultivate
   - and then they appear as *redundant*, never as off-plan.
+- **A role never gives up more than its surplus.** If the deck is three board
+  wipes over, three wipes are listed, not every wipe in the deck.
 - **Cost is never held against a card that serves the plan.** An expensive
   on-plan card is a payoff, not a cut: Kindred Summons costs seven mana and
   does exactly one thing, and that thing wins a typal game.
@@ -262,8 +299,8 @@ list never runs longer than the number of slots the advice actually needs.
   report says how many cards had no tag data at all.
 - Role density is a count of cards, not a measure of quality or efficiency:
   ten bad draw spells and ten good ones look identical here. The cut list
-  inherits this - it ranks how well a card connects to the plan, not how
-  strong the card is.
+  softens this with EDHREC rank, but rank measures popularity, not power, and
+  a card can be both unpopular and exactly right for your deck.
 - The tool sees a decklist, not a play pattern. It cannot see that two cards
   combo, that the mana base's untapped ratio is wrong, or that the deck is
   simply too strong or too weak for its table.
@@ -274,11 +311,13 @@ list never runs longer than the number of slots the advice actually needs.
 python3 -m unittest discover -s tests -v
 ```
 
-60 tests: parsing, split-card identifiers, partner pairing, role assignment,
-creature-type concentration, commander weighting and curve allowance, feature
-maths, legality checks, distance and mixture properties, blend gating,
-cut-candidate tiers, advice guards, plus an end-to-end check that each sample
-deck classifies as intended (skipped if the Scryfall cache is empty).
+71 tests: parsing, split-card identifiers, partner pairing and inference, role
+assignment, creature-type concentration, {X} spell costing, commander
+weighting, curve allowance, high-curve commanders and commander-driven plan
+shape, feature maths, legality checks, distance and mixture properties, blend
+gating, cut-candidate tiers, staple protection, advice guards, plus an
+end-to-end check that each sample deck classifies as intended (skipped if the
+Scryfall cache is empty).
 
 ## Layout
 
@@ -293,10 +332,13 @@ mtgcoach/
   advice.py      fundamentals and direction recommendation passes
   report.py      terminal and JSON rendering
   cli.py         argument parsing and command dispatch
-decks/           seven exemplar decks plus one deliberately rough beginner deck
+decks/           exemplar decks plus one deliberately rough beginner deck
 tests/           unit and end-to-end tests
 ```
 
 Cached Scryfall data lives in `.cache/mtgcoach/` (override with
 `MTGCOACH_CACHE`). The oracle tag file is about 6 MB and is re-downloaded
-every 14 days.
+every 14 days. The card cache carries a schema version
+(`scryfall.CARD_CACHE_SCHEMA`) - **bump it whenever `_face_aware` extracts a
+new field**, or entries cached by an older build are served without it and the
+new data silently reads as missing everywhere.

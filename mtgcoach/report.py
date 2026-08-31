@@ -10,7 +10,7 @@ from .advice import (CutCandidate, Recommendation, _join, color_sources_needed,
                      recommended_lands, swap_budget)
 from .classify import Classification
 from .features import (COLOR_NAMES, COLORS, CURVE_BUCKETS, DeckAnalysis,
-                       FEATURE_NAMES)
+                       FEATURE_NAMES, X_SPELL_ALLOWANCE)
 from .roles import ROLES, ROLES_BY_KEY
 
 WIDTH = 78
@@ -131,12 +131,12 @@ def render(analysis: DeckAnalysis, classification: Classification,
                              "already accounts for that."
                              % _join(analysis.commander_notes), indent=2):
                 add(line)
-        plural = "s are" if len(analysis.commanders) > 1 else " is"
-        for line in wrap("(your commander%s castable every game, so %s count "
+        many = len(analysis.commanders) > 1
+        for line in wrap("(your commander%s castable every game, so %s count%s "
                          "for more than one card when measuring what this deck "
-                         "does)" % (plural,
-                                    "they" if len(analysis.commanders) > 1
-                                    else "it"), indent=2):
+                         "does)" % ("s are" if many else " is",
+                                    "they" if many else "it",
+                                    "" if many else "s"), indent=2):
             add(st.dim(line))
         add("")
 
@@ -146,6 +146,14 @@ def render(analysis: DeckAnalysis, classification: Classification,
     for bucket in CURVE_BUCKETS:
         count = analysis.curve.get(bucket, 0)
         add("  %2s | %-30s %2d" % (bucket, bar(count, peak, 30), count))
+    if analysis.x_spell_count:
+        for line in wrap("%d spell%s cost {X}. Scryfall reports those as their "
+                         "printed cost, which counts Fireball as a one-drop, "
+                         "so they are placed %.0f mana higher per {X} here."
+                         % (analysis.x_spell_count,
+                            "" if analysis.x_spell_count == 1 else "s",
+                            X_SPELL_ALLOWANCE), indent=2):
+            add(st.dim(line))
     add("")
 
     # ---- colours --------------------------------------------------------- #
@@ -279,7 +287,7 @@ def render(analysis: DeckAnalysis, classification: Classification,
         add("")
 
     # ---- footnotes ------------------------------------------------------- #
-    notes = []
+    notes = list(analysis.warnings)
     if analysis.untagged:
         notes.append("%d card(s) had no Scryfall Tagger data; their roles came "
                      "from rules text alone." % analysis.untagged)
@@ -351,6 +359,7 @@ def to_json(analysis: DeckAnalysis, classification: Classification,
             "main_creature_type": analysis.dominant_type,
             "main_creature_type_count": analysis.dominant_type_count,
             "creature_count": analysis.creature_count,
+            "x_spells": analysis.x_spell_count,
             "median_mana_value": analysis.median_mv,
             "mana_sources": analysis.mana_sources(),
             "curve": dict(analysis.curve),

@@ -199,7 +199,7 @@ ARCHETYPES: List[Archetype] = [
         "recursive engine.",
         {"lands_matter": 0.35, "ramp": 0.38, "recursion": 0.22,
          "graveyard_matters": 0.18, "card_draw": 0.22, "creature_share": 0.45,
-         "removal_spot": 0.14, "land_share": 0.44, "low_curve_share": 0.42,
+         "removal_spot": 0.14, "land_share": 0.44, "low_curve_share": 0.36,
          "avg_mv_norm": 0.46, "tokens": 0.12, "sacrifice": 0.15,
          "combat_aggro": 0.18, "instant_sorcery_share": 0.32,
          "noncreature_permanent_share": 0.14},
@@ -264,7 +264,7 @@ ARCHETYPES: List[Archetype] = [
          "tokens": 0.15, "card_draw": 0.22, "protection": 0.15, "ramp": 0.17,
          "removal_spot": 0.12, "removal_mass": 0.04, "low_curve_share": 0.50,
          "avg_mv_norm": 0.42, "noncreature_permanent_share": 0.26,
-         "instant_sorcery_share": 0.22, "typal_concentration": 0.40},
+         "instant_sorcery_share": 0.22},
         signature=["counters_matter", "creature_share"],
         watch_out="Counters are card advantage stored on a creature, which "
                   "makes each creature a bigger loss. Carry protection, and "

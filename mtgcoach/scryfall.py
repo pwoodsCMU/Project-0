@@ -42,6 +42,11 @@ _last_request = [0.0]
 
 TAGS_MAX_AGE_DAYS = 14
 
+# Bump whenever _face_aware starts extracting a different set of fields, so
+# entries cached by an older build are discarded rather than silently served
+# without the new data.
+CARD_CACHE_SCHEMA = 2
+
 
 class ScryfallError(RuntimeError):
     pass
@@ -188,6 +193,9 @@ def _face_aware(card: dict) -> dict:
         "toughness": toughness,
         "keywords": sorted(set(keywords)),
         "produced_mana": card.get("produced_mana") or [],
+        # How widely the card is played in Commander. Low is popular; the
+        # top few hundred are format staples.
+        "edhrec_rank": card.get("edhrec_rank"),
         "layout": card.get("layout", ""),
         "rarity": card.get("rarity", ""),
     }
@@ -201,7 +209,11 @@ def fetch_cards(names: Sequence[str], offline: bool = False,
     analysis of the same deck needs no network at all.
     """
     cache_file = _cache_path("cards.json.gz")
-    cache: Dict[str, dict] = _read_json(cache_file) or {}
+    stored = _read_json(cache_file) or {}
+    if stored.get("schema") == CARD_CACHE_SCHEMA:
+        cache: Dict[str, dict] = stored.get("cards") or {}
+    else:
+        cache = {}      # written by an older field set; refetch on demand
 
     resolved: Dict[str, dict] = {}
     missing: List[str] = []
@@ -266,7 +278,7 @@ def fetch_cards(names: Sequence[str], offline: bool = False,
                 missing.append(req)
 
     if dirty:
-        _write_json(cache_file, cache)
+        _write_json(cache_file, {"schema": CARD_CACHE_SCHEMA, "cards": cache})
     return resolved, missing
 
 

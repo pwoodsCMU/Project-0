@@ -35,9 +35,48 @@ NEVER_TRIM = frozenset(["card_draw", "removal_spot", "protection"])
 # the number any Commander deck wants, not merely past what one archetype
 # prefers.  Without these floors a five-colour deck gets told to cut Cultivate.
 UNIVERSAL_FLOORS = {
-    "ramp": 12, "card_draw": 12, "removal_spot": 10, "removal_mass": 4,
-    "counterspell": 10, "protection": 10, "tutor": 8,
+    "ramp": 16, "card_draw": 14, "removal_spot": 12, "removal_mass": 6,
+    "counterspell": 12, "protection": 12, "tutor": 10,
 }
+
+# EDHREC rank is how widely a card is played in Commander. The top few hundred
+# are format staples, and "you have one board wipe too many" is a bad reason to
+# cut the best board wipe ever printed. Staples can still be trimmed at the
+# role level; they are just never the card the tool points at.
+STAPLE_RANK = 600
+
+# What a commander caring about something implies about the deck's shape.
+# These are not roles a card carries, so without this an artifact commander's
+# deck gets told to trim the artifacts it is built on.
+# Shape features that pull against each other. If the commander wants one, the
+# deck should not be advised toward its opposite.
+SHAPE_CONFLICTS = {
+    "noncreature_permanent_share": ["instant_sorcery_share"],
+    "creature_share": ["instant_sorcery_share"],
+    "instant_sorcery_share": ["creature_share", "noncreature_permanent_share"],
+    "top_end_share": ["low_curve_share"],
+}
+
+COMMANDER_SHAPE_IMPLICATIONS = {
+    "artifact_matters": ["noncreature_permanent_share"],
+    "enchantment_matters": ["noncreature_permanent_share"],
+    "equipment_auras": ["noncreature_permanent_share"],
+    "typal": ["typal_concentration", "creature_share"],
+    "counters_matter": ["creature_share"],
+    "tokens": ["creature_share"],
+    "sacrifice": ["creature_share"],
+    "combat_aggro": ["creature_share"],
+}
+
+
+def commander_wants(analysis: DeckAnalysis) -> set:
+    """Everything the commander itself argues for, roles and shape alike."""
+    wants = set()
+    for cmdr in analysis.commanders:
+        wants.update(cmdr.roles)
+        for role in cmdr.roles:
+            wants.update(COMMANDER_SHAPE_IMPLICATIONS.get(role, ()))
+    return wants
 
 # Roles that earn a card its slot in any deck, whatever the plan is.  Without
 # this, a synergy score cheerfully recommends cutting Sol Ring for being
@@ -54,6 +93,11 @@ TRIM_GAP = 0.08
 
 # Absolute floor on a gap worth mentioning, in share-of-spells terms.
 MIN_GAP = 0.05
+
+
+def _article(word: str) -> str:
+    """"a" or "an", for archetype names dropped into a sentence."""
+    return "an" if word[:1].upper() in "AEIOU" else "a"
 
 
 def _join(items: Sequence[str]) -> str:
@@ -92,20 +136,24 @@ class Recommendation(object):
 class CutCandidate(object):
     """A card the deck can most afford to lose, and why."""
 
-    __slots__ = ("name", "quantity", "mana_value", "reason", "roles", "tier")
+    __slots__ = ("name", "quantity", "mana_value", "reason", "roles", "tier",
+                 "rank")
 
     def __init__(self, name: str, quantity: int, mana_value: float,
-                 reason: str, roles: Sequence[str], tier: str):
+                 reason: str, roles: Sequence[str], tier: str,
+                 rank: Optional[int] = None):
         self.name = name
         self.quantity = quantity
         self.mana_value = mana_value
         self.reason = reason
         self.roles = list(roles)
         self.tier = tier          # "dead" | "off_plan" | "redundant"
+        self.rank = rank          # EDHREC rank; lower is more widely played
 
     def as_dict(self) -> Dict[str, object]:
         return {"name": self.name, "mana_value": self.mana_value,
-                "reason": self.reason, "roles": self.roles, "tier": self.tier}
+                "reason": self.reason, "roles": self.roles, "tier": self.tier,
+                "edhrec_rank": self.rank}
 
 
 # What to say when a deck is short of / heavy on a given feature.
@@ -375,14 +423,21 @@ def fundamentals(analysis: DeckAnalysis,
     spot = counts.get("removal_spot", 0)
     mass = counts.get("removal_mass", 0)
     interaction = spot + mass + counts.get("counterspell", 0)
-    if interaction < 8:
+    if interaction < 10:
         out.append(Recommendation(
             HIGH, "fundamentals", "Add more interaction",
             "You have %d cards that answer an opponent (%d spot removal, %d "
-            "mass removal). Commander decks want 8-12; without them you simply "
-            "lose to whoever plays the strongest permanent."
-            % (interaction, spot, mass),
+            "mass removal). Commander decks want 10-14 across three "
+            "opponents; without them you simply lose to whoever plays the "
+            "strongest permanent." % (interaction, spot, mass),
             "%d answers" % interaction))
+    elif spot < 6:
+        out.append(Recommendation(
+            MEDIUM, "fundamentals", "Add more spot removal",
+            "You have %d pieces of targeted removal. Board wipes and "
+            "counterspells do not answer the resolved permanent that is "
+            "already killing you - aim for 6-10 that do." % spot,
+            "%d spot removal" % spot))
     if mass < 2 and not aggro_ish:
         out.append(Recommendation(
             MEDIUM, "fundamentals", "Add a board wipe or two",
@@ -392,7 +447,9 @@ def fundamentals(analysis: DeckAnalysis,
 
     # --- curve ------------------------------------------------------------ #
     effective_mv = analysis.effective_avg_mv()
-    if effective_mv > 3.6:
+    if analysis.commander_wants_high_curve:
+        pass          # the expensive cards are the point; see the note below
+    elif effective_mv > 3.6:
         heavy = analysis.curve.get("6", 0) + analysis.curve.get("7+", 0)
         caveat = ""
         if analysis.commander_curve_allowance:
@@ -407,14 +464,21 @@ def fundamentals(analysis: DeckAnalysis,
             % (analysis.avg_mv, heavy, caveat),
             "avg MV %.2f (effective %.2f)" % (analysis.avg_mv, effective_mv)))
 
+    # A deck with a lot of cheap ramp is doing something on turns one to three
+    # even when few of its spells are cheap, so the bar comes down.
     cheap = sum(analysis.curve.get(b, 0) for b in ("0", "1", "2"))
-    if cheap / float(nonland) < 0.25:
+    cheap_ramp = sum(e.quantity for e in analysis.entries
+                     if "ramp" in e.roles and e.effective_mana_value <= 3)
+    threshold = 0.25 - min(0.08, max(0, cheap_ramp - 8) * 0.01)
+    if analysis.commander_wants_high_curve:
+        threshold = 0.0
+    if cheap / float(nonland) < threshold:
         out.append(Recommendation(
             MEDIUM, "fundamentals", "Add more early plays",
             "Only %d of your %d spells cost 2 or less (%.0f%%). Aim for about "
-            "a third, so your first three turns are not blank."
+            "a quarter to a third, so your first three turns are not blank."
             % (cheap, nonland, 100.0 * cheap / nonland),
-            "%d cheap spells" % cheap))
+            "%d cheap spells, %d cheap ramp" % (cheap, cheap_ramp)))
 
     # --- data quality / legality ------------------------------------------ #
     for issue in analysis.legality:
@@ -461,8 +525,13 @@ def direction(analysis: DeckAnalysis, classification: Classification,
 
     # Whatever the commander does is the deck's identity by definition - it is
     # the one card every game starts with. Never advise trimming it away.
-    for cmdr in analysis.commanders:
-        identity.update(cmdr.roles)
+    wants = commander_wants(analysis)
+    identity.update(wants)
+    blocked = set()
+    for name in wants:
+        blocked.update(SHAPE_CONFLICTS.get(name, ()))
+    if analysis.commander_wants_high_curve:
+        blocked.update(["low_curve_share", "avg_mv_norm"])
 
     if target_archetype is not None:
         target = dict(target_archetype.profile)
@@ -496,7 +565,7 @@ def direction(analysis: DeckAnalysis, classification: Classification,
             continue  # covered, with better numbers, by the fundamentals pass
         # Only argue about features the matched archetypes take a position on;
         # everything else is baseline filler, not a real signal.
-        if name not in declared:
+        if name not in declared or name in blocked:
             continue
         if abs(gap) < floor or abs(gap) * nonland < 2.0 or score < 0.03:
             continue
@@ -571,7 +640,8 @@ def focus_note(analysis: DeckAnalysis, classification: Classification,
 
     if best.archetype.watch_out and best.fit >= 0.35:
         out.append(Recommendation(
-            LOW, "focus", "Watch out, as a %s deck" % best.archetype.name,
+            LOW, "focus", "Watch out, as %s %s deck"
+            % (_article(best.archetype.name), best.archetype.name),
             best.archetype.watch_out))
 
     # Signature-role check: is the deck missing the thing that defines its
@@ -583,8 +653,8 @@ def focus_note(analysis: DeckAnalysis, classification: Classification,
             role = ROLES_BY_KEY.get(role_key)
             label = role.label if role else role_key.replace("_", " ")
             out.append(Recommendation(
-                HIGH, "focus", "Missing the core of a %s deck"
-                % best.archetype.name,
+                HIGH, "focus", "Missing the core of %s %s deck"
+                % (_article(best.archetype.name), best.archetype.name),
                 "%s is what makes %s work, and you are at %.0f%% of the deck "
                 "against about %.0f%% for the archetype. Adding roughly %d more "
                 "would make the plan actually come together."
@@ -597,7 +667,8 @@ def focus_note(analysis: DeckAnalysis, classification: Classification,
 
 
 def plan_roles(classification: Classification, blend_top: int = 2,
-               target_archetype: Optional[Archetype] = None) -> set:
+               target_archetype: Optional[Archetype] = None,
+               analysis: Optional[DeckAnalysis] = None) -> set:
     """The role features the deck's plan actively wants more of than average.
 
     A role only counts as "on plan" if the archetype takes a position on it
@@ -617,6 +688,9 @@ def plan_roles(classification: Classification, blend_top: int = 2,
         for name in arch.declared:
             if arch.profile.get(name, 0.0) > BASELINE.get(name, 0.0) * 1.05:
                 wanted.add(name)
+    # Whatever the commander cares about is on plan by definition.
+    if analysis is not None:
+        wanted.update(commander_wants(analysis))
     return wanted
 
 
@@ -687,7 +761,7 @@ def cut_candidates(analysis: DeckAnalysis, classification: Classification,
     Having *too much* ramp is real, but it is a role-level trim, which the
     direction pass handles.
     """
-    wanted = plan_roles(classification, blend_top, target_archetype)
+    wanted = plan_roles(classification, blend_top, target_archetype, analysis)
     plan_name = (target_archetype.name if target_archetype is not None
                  else classification.best.archetype.name)
     nonland = analysis.nonland_count or 1
@@ -699,14 +773,17 @@ def cut_candidates(analysis: DeckAnalysis, classification: Classification,
         target = dict(target_archetype.profile)
     else:
         target = blended_target(classification, blend_top)
-    oversupplied = set()
+    oversupplied = {}
     for key in analysis.role_counts:
         count = analysis.role_counts.get(key, 0)
         wanted_count = target.get(key, 0.0) * nonland
         if key in UNIVERSAL_FLOORS:
             wanted_count = max(wanted_count, UNIVERSAL_FLOORS[key])
-        if count - wanted_count >= 2.0:
-            oversupplied.add(key)
+        surplus = count - wanted_count
+        if surplus >= 2.0:
+            # Remember by how much: a role that is three cards over should
+            # surrender three cards, not every card that fills it.
+            oversupplied[key] = int(surplus)
 
     dead: List[CutCandidate] = []
     off_plan: List[CutCandidate] = []
@@ -718,34 +795,49 @@ def cut_candidates(analysis: DeckAnalysis, classification: Classification,
         roles = entry.roles
         on_plan = len(roles & wanted)
         shape = _shape_credit(entry, analysis, wanted)
-        protected = bool((roles & UNIVERSAL_ROLES) - oversupplied)
+        protected = bool((roles & UNIVERSAL_ROLES) - set(oversupplied))
+        rank = entry.edhrec_rank
+        staple = rank is not None and rank <= STAPLE_RANK
 
         if not roles and _tribe_credit(entry, analysis, wanted) == 0:
             dead.append(CutCandidate(
                 entry.name, entry.quantity, entry.mana_value,
                 "does nothing the rest of the deck can build on",
-                sorted(roles), "dead"))
-        elif protected:
-            continue          # earns its slot in any deck
-        elif roles and roles <= oversupplied:
+                sorted(roles), "dead", rank))
+        elif protected or staple:
+            continue          # earns its slot in any deck, or is a staple
+        elif roles and roles <= set(oversupplied):
             redundant.append(CutCandidate(
                 entry.name, entry.quantity, entry.mana_value,
                 "you already have more %s than the plan needs, and this is one "
                 "of the more expensive ones"
                 % _join(sorted(ROLES_BY_KEY[r].label.lower()
                                for r in roles if r in ROLES_BY_KEY)),
-                sorted(roles), "redundant"))
+                sorted(roles), "redundant", rank))
         elif on_plan == 0 and shape == 0:
             off_plan.append(CutCandidate(
                 entry.name, entry.quantity, entry.mana_value,
                 "nothing it does serves your %s plan" % plan_name,
-                sorted(roles), "off_plan"))
+                sorted(roles), "off_plan", rank))
 
-    # Within each tier the most expensive card is the first one to go.
+    # Most expensive first within every tier - the priciest copy of an effect
+    # you have too many of is the one to lose. Rank breaks ties so the
+    # less-played of two equally costly cards goes first.
     for group in (dead, off_plan, redundant):
-        group.sort(key=lambda c: -c.mana_value)
+        group.sort(key=lambda c: (-c.mana_value, -(c.rank or 100000)))
 
-    return (dead + off_plan + redundant)[:limit]
+    # Never propose more cards from an over-supplied role than the surplus.
+    quota = dict(oversupplied)
+    trimmed: List[CutCandidate] = []
+    for candidate in redundant:
+        keys = [r for r in candidate.roles if r in quota and quota[r] > 0]
+        if not keys and candidate.roles:
+            continue
+        for key in keys:
+            quota[key] -= 1
+        trimmed.append(candidate)
+
+    return (dead + off_plan + trimmed)[:limit]
 
 
 def swap_budget(recommendations: Sequence[Recommendation]) -> int:

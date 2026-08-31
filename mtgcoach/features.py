@@ -25,6 +25,13 @@ PIP_RE = re.compile(r"\{([^}]+)\}")
 # belongs to whatever tribe the deck is playing.
 CHANGELING_RE = re.compile(r"(changeling|is every creature type)", re.IGNORECASE)
 
+# Scryfall reports {X} as zero, so Fireball is mana value 1 and Walking
+# Ballista is 0.  Nobody casts them for X=0, and treating them as one-drops
+# makes a deck of mana sinks look like it has a superb early game.  Count them
+# at a realistic X instead.
+X_COST_RE = re.compile(r"\{X\}")
+X_SPELL_ALLOWANCE = 2.0
+
 # The commander is castable in every single game, so it carries more weight in
 # the deck's identity than any one of the other 99 cards.  Role densities in
 # the feature vector count it this many times; the descriptive counts stay
@@ -68,7 +75,7 @@ FEATURE_WEIGHTS: Dict[str, float] = {
     "ramp": 1.0,
     "card_draw": 0.9,
     "tutor": 0.8,
-    "removal_spot": 0.9,
+    "removal_spot": 1.0,
     "removal_mass": 1.0,
     "counterspell": 1.3,
     "protection": 0.6,
@@ -90,7 +97,7 @@ FEATURE_WEIGHTS: Dict[str, float] = {
     "instant_sorcery_share": 1.0,
     "noncreature_permanent_share": 0.6,
     "avg_mv_norm": 0.9,
-    "low_curve_share": 0.7,
+    "low_curve_share": 0.5,
     "top_end_share": 0.7,
     "land_share": 0.4,
 }
@@ -118,6 +125,22 @@ class CardEntry(object):
     @property
     def mana_value(self) -> float:
         return float(self.card.get("mana_value", 0.0))
+
+    @property
+    def is_x_spell(self) -> bool:
+        return bool(X_COST_RE.search(self.card.get("mana_cost") or ""))
+
+    @property
+    def effective_mana_value(self) -> float:
+        """Mana value with {X} counted as something you would actually pay."""
+        if self.is_x_spell:
+            count = len(X_COST_RE.findall(self.card.get("mana_cost") or ""))
+            return self.mana_value + X_SPELL_ALLOWANCE * count
+        return self.mana_value
+
+    @property
+    def edhrec_rank(self):
+        return self.card.get("edhrec_rank")
 
     @property
     def type_line(self) -> str:
@@ -151,12 +174,14 @@ class DeckAnalysis(object):
         self.legality: List[str] = []
         self.mdfc_land_backs = 0
         self.untagged = 0
+        self.x_spell_count = 0
         self.creature_count = 0
         self.dominant_type = ""
         self.dominant_type_count = 0
         self.subtype_counts: Dict[str, int] = {}
         self.commander_notes: List[str] = []
         self.commander_curve_allowance = 0.0
+        self.commander_wants_high_curve = False
 
     def effective_avg_mv(self) -> float:
         """Average mana value, discounted for what the commander makes cheaper."""
@@ -205,10 +230,82 @@ def _pips(mana_cost: str) -> Dict[str, int]:
     return out
 
 
+def _plain_partner(text: str) -> bool:
+    return bool(re.search(r"(^|\n)partner\b", text, re.IGNORECASE)
+                and "partner with" not in text.lower())
+
+
+def infer_partner(parsed_deck, cards: Dict[str, dict]) -> Optional[str]:
+    """Promote a missed partner commander out of the maindeck.
+
+    Exports do not agree on where the second commander goes - one real list
+    puts the two partners in separate blank-line-separated blocks, so only the
+    first is detected and fifty cards then read as off-colour.  When the lone
+    detected commander can legally pair with exactly one legendary card in the
+    deck, and promoting it repairs colour-identity violations, promote it.
+    """
+    commanders = [e for e in parsed_deck.entries if e.is_commander]
+    if len(commanders) != 1:
+        return None
+    lead = cards.get(normalize_name(commanders[0].name))
+    if lead is None:
+        return None
+    lead_text = lead.get("oracle_text") or ""
+    named = re.search(r"partner with ([^\n(]+)", lead_text, re.IGNORECASE)
+    if not named and not _plain_partner(lead_text):
+        return None
+
+    candidates = []
+    for entry in parsed_deck.entries:
+        if entry.is_commander:
+            continue
+        card = cards.get(normalize_name(entry.name))
+        if card is None or "legendary" not in (card.get("type_line") or "").lower():
+            continue
+        text = card.get("oracle_text") or ""
+        if named:
+            wanted = named.group(1).strip().rstrip(".").lower()
+            if entry.name.lower().startswith(wanted):
+                return _promote(parsed_deck, entry)
+        elif _plain_partner(text):
+            candidates.append((entry, card))
+
+    if len(candidates) != 1:
+        return None
+    entry, card = candidates[0]
+
+    # Only promote when it actually explains the deck: the partner's colours
+    # have to be carrying cards the lone commander cannot.
+    allowed = set(lead.get("color_identity") or [])
+    widened = allowed | set(card.get("color_identity") or [])
+    def violations(identity):
+        return sum(1 for e in parsed_deck.entries
+                   if (set((cards.get(normalize_name(e.name)) or {})
+                           .get("color_identity") or []) - identity))
+    if violations(widened) < violations(allowed):
+        return _promote(parsed_deck, entry)
+    return None
+
+
+def _promote(parsed_deck, entry) -> str:
+    for other in parsed_deck.entries:
+        if other.name == entry.name:
+            other.is_commander = True
+    return entry.name
+
+
 def analyze(parsed_deck, cards: Dict[str, dict], tag_index: Dict[str, List[str]]) -> DeckAnalysis:
     """Build a :class:`DeckAnalysis` from a parsed decklist and Scryfall data."""
     an = DeckAnalysis()
+    promoted = infer_partner(parsed_deck, cards)
     an.warnings.extend(parsed_deck.warnings)
+    if promoted:
+        an.warnings.append(
+            "%s was read as your second commander - it partners with %s and "
+            "your deck's colours need it. Mark it in a Commander section if "
+            "that is wrong." % (promoted,
+                                next(e.name for e in parsed_deck.entries
+                                     if e.is_commander and e.name != promoted)))
 
     mana_values: List[float] = []
 
@@ -238,7 +335,9 @@ def analyze(parsed_deck, cards: Dict[str, dict], tag_index: Dict[str, List[str]]
                     an.color_sources[color] += quantity
         else:
             an.nonland_count += quantity
-            mv = entry.mana_value
+            mv = entry.effective_mana_value
+            if entry.is_x_spell:
+                an.x_spell_count += quantity
             mana_values.extend([mv] * quantity)
             key = "7+" if mv >= 7 else str(int(mv))
             an.curve[key] = an.curve.get(key, 0) + quantity
@@ -284,6 +383,15 @@ def _commander_effects(an: DeckAnalysis) -> None:
     allowance = 0.0
     seen = set()
     for cmdr in an.commanders:
+        # A commander that pays you for expensive permanents means the high
+        # curve is the plan, not a mistake.
+        if ("high mana value matters" in cmdr.tags
+                or re.search(r"mana value \d+ or (greater|more)",
+                             cmdr.card.get("oracle_text") or "", re.IGNORECASE)):
+            an.commander_wants_high_curve = True
+            an.commander_notes.append("%s rewards expensive permanents"
+                                      % cmdr.name)
+            seen.add((cmdr.name, "rewards expensive permanents"))
         text = cmdr.card.get("oracle_text") or ""
         found = []
         for pattern, description, weight in COMMANDER_COST_PATTERNS:

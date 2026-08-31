@@ -301,6 +301,106 @@ class TestCommanderInfluence(unittest.TestCase):
         self.assertAlmostEqual(an.effective_avg_mv(), an.avg_mv)
 
 
+class TestXSpells(unittest.TestCase):
+    def test_x_spells_are_not_counted_as_cheap(self):
+        cards_list = [
+            card("Plains", cost="", mv=0.0, type_line="Basic Land — Plains"),
+            card("Boss", type_line="Legendary Creature — Human"),
+            card("Fireball", cost="{X}{R}", mv=1.0, type_line="Sorcery",
+                 text="Fireball deals X damage divided as you choose."),
+            card("Walking Ballista", cost="{X}{X}", mv=0.0,
+                 type_line="Artifact Creature — Construct"),
+        ]
+        text = ("// Commander\n1 Boss\n\n// Deck\n1 Fireball\n"
+                "1 Walking Ballista\n36 Plains\n")
+        parsed, cards, tags = build(cards_list, text)
+        an = features.analyze(parsed, cards, tags)
+        self.assertEqual(an.x_spell_count, 2)
+        # {X} counts for two mana each: Fireball lands at 3, Ballista at 4.
+        self.assertEqual(an.curve["3"], 1)
+        self.assertEqual(an.curve["4"], 1)
+        self.assertEqual(an.curve["0"], 0)
+        self.assertEqual(an.curve["1"], 0)
+
+    def test_ordinary_spells_are_unaffected(self):
+        cards_list = [
+            card("Plains", cost="", mv=0.0, type_line="Basic Land — Plains"),
+            card("Boss", type_line="Legendary Creature — Human"),
+            card("Shock", cost="{R}", mv=1.0, type_line="Instant"),
+        ]
+        parsed, cards, tags = build(
+            cards_list, "// Commander\n1 Boss\n\n// Deck\n1 Shock\n36 Plains\n")
+        an = features.analyze(parsed, cards, tags)
+        self.assertEqual(an.x_spell_count, 0)
+        self.assertEqual(an.curve["1"], 1)
+
+
+class TestStapleProtection(unittest.TestCase):
+    def _deck_with(self, extra):
+        cards_list = [
+            card("Plains", cost="", mv=0.0, type_line="Basic Land — Plains"),
+            card("Boss", type_line="Legendary Creature — Human"),
+        ] + extra
+        lines = "".join("1 %s\n" % c["name"] for c in extra)
+        text = "// Commander\n1 Boss\n\n// Deck\n%s36 Plains\n" % lines
+        parsed, cards, tags = build(cards_list, text)
+        return features.analyze(parsed, cards, tags)
+
+    def test_a_staple_is_never_pointed_at(self):
+        wipes = []
+        for i in range(12):
+            entry = card("Wipe %d" % i, cost="{3}{W}{W}", mv=5.0,
+                         type_line="Sorcery", text="Destroy all creatures.")
+            entry["edhrec_rank"] = 9000
+            wipes.append(entry)
+        farewell = card("Farewell", cost="{4}{W}{W}", mv=6.0,
+                        type_line="Sorcery", text="Destroy all creatures.")
+        farewell["edhrec_rank"] = 169          # a real format staple
+        an = self._deck_with(wipes + [farewell])
+        result = classify.classify(an.vector)
+        names = [c.name for c in advice.cut_candidates(an, result, limit=99)]
+        self.assertNotIn("Farewell", names)
+        self.assertTrue(names, "expected the unremarkable wipes to be listed")
+
+    def test_a_role_never_gives_up_more_than_its_surplus(self):
+        wipes = []
+        for i in range(14):
+            entry = card("Wipe %d" % i, cost="{3}{W}{W}", mv=5.0,
+                         type_line="Sorcery", text="Destroy all creatures.")
+            entry["edhrec_rank"] = 9000
+            wipes.append(entry)
+        an = self._deck_with(wipes)
+        result = classify.classify(an.vector)
+        cuts = advice.cut_candidates(an, result, limit=99)
+        surplus = 14 - advice.UNIVERSAL_FLOORS["removal_mass"]
+        self.assertLessEqual(len([c for c in cuts if c.tier == "redundant"]),
+                             surplus)
+
+
+class TestCommanderShapesThePlan(unittest.TestCase):
+    def test_an_artifact_commander_protects_its_artifacts(self):
+        # The complaint this fixes: an artifact/enchantment commander's deck
+        # being told to trim noncreature permanents.
+        cards_list = [
+            card("Plains", cost="", mv=0.0, type_line="Basic Land — Plains"),
+            card("Artifact Boss", type_line="Legendary Creature — Human",
+                 text="Artifacts you control get +1/+1."),
+        ]
+        cards_list += [card("Widget %d" % i, cost="{3}", mv=4.0,
+                            type_line="Artifact") for i in range(20)]
+        text = ("// Commander\n1 Artifact Boss\n\n// Deck\n"
+                + "\n".join("1 Widget %d" % i for i in range(20))
+                + "\n36 Plains\n")
+        parsed, cards, tags = build(cards_list, text)
+        an = features.analyze(parsed, cards, tags)
+        self.assertIn("artifact_matters", an.commanders[0].roles)
+        wants = advice.commander_wants(an)
+        self.assertIn("noncreature_permanent_share", wants)
+        result = classify.classify(an.vector)
+        titles = [r.title for r in advice.direction(an, result)]
+        self.assertNotIn("Trim noncreature permanents", titles)
+
+
 class TestClassification(unittest.TestCase):
     def test_archetype_profile_matches_itself(self):
         for arch in archetypes.ARCHETYPES:
@@ -703,6 +803,90 @@ class TestPartnerCommanders(unittest.TestCase):
         an = features.analyze(parsed, cards, tags)
         self.assertEqual(len(an.commander_notes), 1)
         self.assertTrue(an.commander_notes[0].startswith("Discount Lord"))
+
+
+class TestPartnerInference(unittest.TestCase):
+    def _cards(self):
+        return [
+            card("Island", cost="", mv=0.0, type_line="Basic Land — Island",
+                 produces=["U"]),
+            card("Haldan", cost="{1}{U}", mv=2.0,
+                 type_line="Legendary Creature — Human",
+                 text="Partner with Pako, Arcane Retriever", colors=["U"]),
+            card("Pako, Arcane Retriever", cost="{2}{R}{G}", mv=4.0,
+                 type_line="Legendary Creature — Dog",
+                 text="Partner with Haldan", colors=["R", "G"]),
+            card("Red Spell", cost="{R}", mv=1.0, type_line="Instant",
+                 colors=["R"]),
+        ]
+
+    def test_a_partner_separated_by_a_blank_line_is_promoted(self):
+        # One real export puts the two partners in separate blocks, so only
+        # the first is detected and the rest of the deck reads as off-colour.
+        text = ("// Commander\n1 Haldan\n\n// Deck\n"
+                "1 Pako, Arcane Retriever\n1 Red Spell\n1 Island\n")
+        parsed, cards, tags = build(self._cards(), text)
+        an = features.analyze(parsed, cards, tags)
+        self.assertEqual([c.name for c in an.commanders],
+                         ["Haldan", "Pako, Arcane Retriever"])
+        self.assertEqual(an.commander_identity, ["U", "R", "G"])
+        # The Red Spell is only legal because Pako reached the command zone.
+        self.assertFalse([i for i in an.legality if "colour identity" in i])
+        self.assertTrue(any("second commander" in w for w in an.warnings))
+
+    def test_a_lone_commander_without_partner_is_left_alone(self):
+        cards_list = [
+            card("Island", cost="", mv=0.0, type_line="Basic Land — Island"),
+            card("Solo Boss", type_line="Legendary Creature — Human",
+                 text="Flying."),
+            card("Other Legend", type_line="Legendary Creature — Human",
+                 text="Vigilance."),
+        ]
+        text = ("// Commander\n1 Solo Boss\n\n// Deck\n"
+                "1 Other Legend\n1 Island\n")
+        parsed, cards, tags = build(cards_list, text)
+        an = features.analyze(parsed, cards, tags)
+        self.assertEqual([c.name for c in an.commanders], ["Solo Boss"])
+
+    def test_no_promotion_when_colours_do_not_call_for_it(self):
+        # Two mono-blue partners: nothing in the deck needs the second one, so
+        # respect what the list actually said.
+        cards_list = [
+            card("Island", cost="", mv=0.0, type_line="Basic Land — Island"),
+            card("Blue One", cost="{U}", mv=1.0,
+                 type_line="Legendary Creature — Human", text="Partner",
+                 colors=["U"]),
+            card("Blue Two", cost="{U}", mv=1.0,
+                 type_line="Legendary Creature — Human", text="Partner",
+                 colors=["U"]),
+        ]
+        text = ("// Commander\n1 Blue One\n\n// Deck\n1 Blue Two\n1 Island\n")
+        parsed, cards, tags = build(cards_list, text)
+        an = features.analyze(parsed, cards, tags)
+        self.assertEqual([c.name for c in an.commanders], ["Blue One"])
+
+
+class TestHighCurveCommanders(unittest.TestCase):
+    def test_a_commander_that_pays_for_expensive_cards_keeps_its_curve(self):
+        cards_list = [
+            card("Mountain", cost="", mv=0.0, type_line="Basic Land — Mountain"),
+            card("Bello", cost="{1}{R}{G}", mv=3.0,
+                 type_line="Legendary Creature — Raccoon Bard",
+                 text="Non-Creature artifacts and enchantments you control "
+                      "with mana value 4 or greater are Creatures."),
+        ]
+        cards_list += [card("Big Thing %d" % i, cost="{5}{R}", mv=6.0,
+                            type_line="Artifact") for i in range(20)]
+        text = ("// Commander\n1 Bello\n\n// Deck\n"
+                + "\n".join("1 Big Thing %d" % i for i in range(20))
+                + "\n36 Mountain\n")
+        parsed, cards, tags = build(cards_list, text)
+        an = features.analyze(parsed, cards, tags)
+        self.assertTrue(an.commander_wants_high_curve)
+        self.assertGreater(an.avg_mv, 4.0)
+        titles = [r.title for r in advice.fundamentals(an)]
+        self.assertNotIn("Lower your curve", titles)
+        self.assertNotIn("Add more early plays", titles)
 
 
 class TestEndToEnd(unittest.TestCase):

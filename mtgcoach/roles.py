@@ -238,13 +238,15 @@ ROLES: List[Role] = [
 
     Role("artifact_matters", "Artifact synergy",
          "Artifact count and artifact recursion payoffs.",
-         tags=["artifact matters", "synergy-artifact", "repeatable artifact tokens"],
-         text=r"artifacts? you control"),
+         tags=["artifact matters", "synergy-artifact", "repeatable artifact tokens",
+               "animate artifact", "protects-artifact"],
+         text=r"artifacts?( and \w+)? you control"),
 
     Role("enchantment_matters", "Enchantment synergy",
          "Constellation and enchantress-style payoffs.",
-         tags=["synergy-enchantment", "enchantment engine"],
-         text=r"enchantments? you control"),
+         tags=["synergy-enchantment", "enchantment engine", "animate enchantment",
+               "protects-enchantment"],
+         text=r"enchantments?( and \w+)? you control"),
 
 
 
