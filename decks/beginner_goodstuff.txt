@@ -1,0 +1,76 @@
+// A deliberately rough first deck: big creatures, not much else.
+// Commander
+1 Ruric Thar, the Unbowed
+
+// Deck
+1 Colossal Dreadmaw
+1 Terastodon
+1 Woodfall Primus
+1 Craterhoof Behemoth
+1 Rampaging Baloths
+1 Thragtusk
+1 Acidic Slime
+1 Wurmcoil Engine
+1 Pelakka Wurm
+1 Vorinclex, Voice of Hunger
+1 Hornet Queen
+1 Avenger of Zendikar
+1 Molten Primordial
+1 Balefire Dragon
+1 Steel Hellkite
+1 Inferno Titan
+1 Hydra Broodmaster
+1 Charging Monstrosaur
+1 Regisaur Alpha
+1 Ghalta, Primal Hunger
+1 Dragonlord Atarka
+1 Bane of Progress
+1 Sylvan Primordial
+1 Deadwood Treefolk
+1 Ravenous Baboons
+1 Grazing Gladehart
+1 Rubblehulk
+1 Ruination Rioter
+1 Zhur-Taa Ancient
+1 Borborygmos
+1 Gruul Ragebeast
+1 Savage Ventmaw
+1 Nessian Wanderer
+1 Ill-Tempered Loner
+1 Somberwald Sage
+1 Llanowar Elves
+1 Elvish Mystic
+1 Rampant Growth
+1 Cultivate
+1 Kodama's Reach
+1 Explosive Vegetation
+1 Sol Ring
+1 Commander's Sphere
+1 Darksteel Ingot
+1 Shamanic Revelation
+1 Harmonize
+1 Beast Within
+1 Chaos Warp
+1 Naturalize
+1 Lightning Bolt
+1 Star of Extinction
+1 Overrun
+1 Berserk
+1 Aggravated Assault
+1 Rhythm of the Wild
+1 Garruk's Uprising
+1 Xenagos, the Reveler
+1 Domri Rade
+1 Ring of Kalonia
+1 Blade of the Bloodchief
+1 Feed the Clan
+1 Titanic Growth
+1 Prey Upon
+1 Savage Stomp
+1 Kessig Wolf Run
+1 Rogue's Passage
+1 Cinder Glade
+1 Rootbound Crag
+1 Command Tower
+18 Forest
+12 Mountain

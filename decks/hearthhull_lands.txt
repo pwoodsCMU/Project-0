@@ -1,0 +1,94 @@
+// Commander
+1 Hearthhull, the Worldseed
+
+// Deck
+1 Aftermath Analyst
+1 Ancient Greenwarden
+1 Augur of Autumn
+1 Azusa, Lost but Seeking
+1 Bala Ged Recovery
+1 Beast Within
+1 Blasphemous Act
+1 Blazemire Verge
+1 Blood Crypt
+1 Bloodstained Mire
+1 Bojuka Bog
+1 Braids, Arisen Nightmare
+1 Cabaretti Courtyard
+1 Cinder Glade
+1 Command Tower
+1 Conduit of Worlds
+1 Constant Mists
+1 Crop Rotation
+1 Day of Black Sun
+1 Enduring Vitality
+1 Escape Tunnel
+1 Eumidian Hatchery
+1 Evendo Brushrazer
+1 Exploration Broodship
+1 Fabled Passage
+1 Farseek
+1 Field of the Dead
+5 Forest
+1 Harrow
+1 Horizon Explorer
+1 Icetill Explorer
+1 Infernal Grasp
+1 Insidious Fungus
+1 Iridescent Vinelasher
+1 Karplusan Forest
+1 Korvold, Fae-Cursed King
+1 Llanowar Wastes
+1 Lotus Cobra
+1 Lotus Field
+1 Maestros Theater
+1 Mayhem Devil
+1 Mazirek, Kraul Death Priest
+1 Mightform Harmonizer
+2 Mountain
+1 Mountain
+1 Nahiri's Lithoforming
+1 Nature's Lore
+1 Noxious Revival
+1 Oracle of Mul Daya
+1 Overgrown Tomb
+1 Overlord of the Hauntwoods
+1 Putrefy
+1 Rakdos Charm
+1 Ramunap Excavator
+1 Regrowth
+1 Riveteers Overlook
+1 Roiling Regrowth
+1 Rootbound Crag
+1 Sabotender
+1 Scapeshift
+1 Scouring Swarm
+1 Scute Swarm
+1 Six
+1 Smoldering Marsh
+1 Sol Ring
+1 Soul of Windgrace
+1 Splendid Reclamation
+1 Sprouting Goblin
+1 Stomping Ground
+1 Sulfurous Springs
+5 Swamp
+1 Sylvan Library
+1 Sylvan Safekeeper
+1 Szarel, Genesis Shepherd
+1 Tear Asunder
+1 The Gitrog Monster
+1 Thornspire Verge
+1 Tifa Lockhart
+1 Traveling Chocobo
+1 Tunneling Geopede
+1 Untimely Malfunction
+1 Urza's Cave
+1 Vampiric Tutor
+1 Verdant Catacombs
+1 Vernal Fen
+1 Wastewood Verge
+1 Wooded Foothills
+1 Woodland Cemetery
+1 Worldsoul's Rage
+1 Zuran Orb
