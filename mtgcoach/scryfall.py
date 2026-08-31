@@ -28,6 +28,8 @@ import urllib.request
 import re
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
+SPLIT_RE = re.compile(r"\s*//\s*|\s+/\s+")
+
 API = "https://api.scryfall.com"
 HEADERS = {
     "User-Agent": "mtgcoach/0.1 (commander deck analysis, educational project)",
@@ -128,6 +130,23 @@ def normalize_name(name: str) -> str:
     return " ".join(name.strip().lower().split())
 
 
+def card_identifier(name: str) -> Dict[str, str]:
+    """The identifier to send to ``/cards/collection`` for a decklist name.
+
+    Scryfall rejects the combined ``A // B`` name of a split or double-faced
+    card as a ``name`` identifier, but accepts either face on its own, so send
+    the front face and match the answer back by its simplified name.
+
+    Exports disagree on the separator: Moxfield writes ``Dusk // Dawn`` and
+    others write ``Dusk / Dawn``, so both are recognised.  A lone slash only
+    counts when it is spaced, which leaves names like ``Who/What/When`` alone.
+    """
+    faces = SPLIT_RE.split(name, 1)
+    if len(faces) > 1 and faces[0].strip():
+        return {"name": faces[0].strip()}
+    return {"name": name}
+
+
 def simplify_name(name: str) -> str:
     """Looser key that survives accents and punctuation ("Lim-Dul's Vault")."""
     folded = unicodedata.normalize("NFKD", name.lower())
@@ -189,12 +208,12 @@ def fetch_cards(names: Sequence[str], offline: bool = False,
     to_fetch: List[str] = []
     for name in names:
         key = normalize_name(name)
-        if key in cache:
-            if cache[key] is None:
-                missing.append(name)
-            else:
-                resolved[key] = cache[key]
+        entry = cache.get(key)
+        if entry:
+            resolved[key] = entry
         else:
+            if key in cache:
+                del cache[key]      # purge a negative cached by an older run
             to_fetch.append(name)
 
     if to_fetch and offline:
@@ -208,7 +227,8 @@ def fetch_cards(names: Sequence[str], offline: bool = False,
         if progress:
             progress("fetching card data %d-%d of %d"
                      % (start + 1, start + len(chunk), len(to_fetch)))
-        body = json.dumps({"identifiers": [{"name": n} for n in chunk]}).encode("utf-8")
+        body = json.dumps(
+            {"identifiers": [card_identifier(n) for n in chunk]}).encode("utf-8")
         payload = json.loads(_http(API + "/cards/collection", data=body))
 
         loose: Dict[str, dict] = {}
@@ -223,22 +243,27 @@ def fetch_cards(names: Sequence[str], offline: bool = False,
                 loose[simplify_name(name)] = card
             dirty = True
 
-        not_found = {normalize_name(nf.get("name", ""))
-                     for nf in payload.get("not_found", [])}
         for req in chunk:
             key = normalize_name(req)
             if key in resolved:
                 continue
-            # Scryfall matches loosely (accents, punctuation); re-attach those
-            # so the deck entry still resolves under the name the user typed.
+            # Scryfall matches loosely (accents, punctuation) and answers split
+            # cards under their combined name, so re-attach by simplified name
+            # to whatever came back.
             alias = loose.get(simplify_name(req))
-            if alias is not None and key not in not_found:
+            if alias is None:
+                front = SPLIT_RE.split(req, 1)[0].strip()
+                if front and front != req:
+                    alias = loose.get(simplify_name(front))
+            if alias is not None:
                 cache[key] = alias
                 resolved[key] = alias
+                dirty = True
             else:
-                cache[key] = None
+                # Negative results are deliberately not cached: a typo fixed
+                # upstream, or a bug in how we build identifiers, would
+                # otherwise stay "missing" forever.
                 missing.append(req)
-            dirty = True
 
     if dirty:
         _write_json(cache_file, cache)

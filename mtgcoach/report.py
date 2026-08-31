@@ -6,7 +6,7 @@ import os
 import sys
 from typing import Dict, List, Optional, Sequence
 
-from .advice import (CutCandidate, Recommendation, color_sources_needed,
+from .advice import (CutCandidate, Recommendation, _join, color_sources_needed,
                      recommended_lands, swap_budget)
 from .classify import Classification
 from .features import (COLOR_NAMES, COLORS, CURVE_BUCKETS, DeckAnalysis,
@@ -70,9 +70,14 @@ def render(analysis: DeckAnalysis, classification: Classification,
     add(st.bold("MTG COMMANDER DECK REPORT"))
     if deck_name:
         add(st.dim(deck_name))
-    commanders = ", ".join(c.name for c in analysis.commanders) or "(none detected)"
+    # Partner names contain commas of their own, so join with " + ".
+    names = [c.name for c in analysis.commanders]
+    commanders = " + ".join(names) or "(none detected)"
+    label = "Commanders" if len(names) > 1 else "Commander"
     identity = "".join(analysis.commander_identity or analysis.color_identity) or "C"
-    add("Commander: %s   |   Colour identity: %s" % (commanders, identity))
+    for line in wrap("%s: %s   |   Colour identity: %s"
+                     % (label, commanders, identity)):
+        add(line)
     if target is not None:
         add("Building toward: %s" % target.name)
     add("")
@@ -107,8 +112,11 @@ def render(analysis: DeckAnalysis, classification: Classification,
 
     # ---- commander ------------------------------------------------------- #
     if analysis.commanders:
-        add(_rule("YOUR COMMANDER", st))
-        for cmdr in analysis.commanders:
+        add(_rule("YOUR COMMANDERS" if len(analysis.commanders) > 1
+                  else "YOUR COMMANDER", st))
+        for index, cmdr in enumerate(analysis.commanders):
+            if index:
+                add("")
             add("  %s  %s" % (cmdr.name, cmdr.card.get("mana_cost", "")))
             add("  %s" % cmdr.card.get("type_line", ""))
             labels = [ROLES_BY_KEY[r].label for r in sorted(cmdr.roles)
@@ -117,14 +125,18 @@ def render(analysis: DeckAnalysis, classification: Classification,
                 for line in wrap("Does: " + ", ".join(labels), indent=2):
                     add(line)
         if analysis.commander_notes:
-            for line in wrap("Because your commander %s, this deck can "
-                             "support a higher curve than usual - the land and "
-                             "curve advice below already accounts for that."
-                             % " and ".join(analysis.commander_notes), indent=2):
+            add("")
+            for line in wrap("Because %s, this deck can support a higher curve "
+                             "than usual - the land and curve advice below "
+                             "already accounts for that."
+                             % _join(analysis.commander_notes), indent=2):
                 add(line)
-        for line in wrap("(your commander is castable every game, so it "
-                         "counts for more than one card when measuring what "
-                         "this deck does)", indent=2):
+        plural = "s are" if len(analysis.commanders) > 1 else " is"
+        for line in wrap("(your commander%s castable every game, so %s count "
+                         "for more than one card when measuring what this deck "
+                         "does)" % (plural,
+                                    "they" if len(analysis.commanders) > 1
+                                    else "it"), indent=2):
             add(st.dim(line))
         add("")
 
@@ -239,14 +251,26 @@ def render(analysis: DeckAnalysis, classification: Classification,
                 add(line)
             add("")
             return "\n".join(out)
-        add("  These contribute least to your plan - work down until it balances:")
-        for candidate in cuts:
-            add("    %-32s %s" % (
-                candidate.name[:32],
-                ("MV %.0f" % candidate.mana_value) if candidate.mana_value else "MV 0"))
-            for line in wrap(candidate.reason, indent=8):
-                add(st.dim(line))
-        add("")
+        headings = [
+            ("dead", "Dead weight - these do nothing the deck builds on:"),
+            ("off_plan", "Off plan - fine cards, but nothing they do serves "
+                         "this deck:"),
+            ("redundant", "If you still need room - the most expensive copies "
+                          "of effects you already have plenty of:"),
+        ]
+        for tier, heading in headings:
+            group = [c for c in cuts if c.tier == tier]
+            if not group:
+                continue
+            for line in wrap(heading, indent=2):
+                add(line)
+            for candidate in group:
+                add("    %-34s %s" % (
+                    candidate.name[:34],
+                    "MV %.0f" % candidate.mana_value))
+                for line in wrap(candidate.reason, indent=8):
+                    add(st.dim(line))
+            add("")
         for line in wrap("This is a starting list, not a verdict - it measures "
                          "how well each card connects to the plan, not how "
                          "strong the card is. A card you keep for fun stays.",

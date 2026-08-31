@@ -31,6 +31,14 @@ _PRIORITY_ORDER = {HIGH: 0, MEDIUM: 1, LOW: 2}
 # Roles almost no Commander deck regrets having more of.
 NEVER_TRIM = frozenset(["card_draw", "removal_spot", "protection"])
 
+# A universally useful role only counts as over-supplied once the deck is past
+# the number any Commander deck wants, not merely past what one archetype
+# prefers.  Without these floors a five-colour deck gets told to cut Cultivate.
+UNIVERSAL_FLOORS = {
+    "ramp": 12, "card_draw": 12, "removal_spot": 10, "removal_mass": 4,
+    "counterspell": 10, "protection": 10, "tutor": 8,
+}
+
 # Roles that earn a card its slot in any deck, whatever the plan is.  Without
 # this, a synergy score cheerfully recommends cutting Sol Ring for being
 # off-theme.
@@ -39,9 +47,6 @@ UNIVERSAL_ROLES = frozenset([
     "counterspell", "protection",
 ])
 
-# Above this score a card is pulling its weight; listing it as a cut would be
-# noise rather than advice.
-CUT_SCORE_CEILING = 3.0
 
 # "You have too much of X" needs a much bigger gap than "you need more X"
 # before it is worth saying - over-investment is usually the deck's identity.
@@ -49,6 +54,14 @@ TRIM_GAP = 0.08
 
 # Absolute floor on a gap worth mentioning, in share-of-spells terms.
 MIN_GAP = 0.05
+
+
+def _join(items: Sequence[str]) -> str:
+    """Join a list into readable prose: 'a', 'a and b', 'a, b and c'."""
+    items = list(items)
+    if len(items) <= 1:
+        return items[0] if items else ""
+    return "%s and %s" % (", ".join(items[:-1]), items[-1])
 
 
 def color_sources_needed(pips: int) -> int:
@@ -79,21 +92,20 @@ class Recommendation(object):
 class CutCandidate(object):
     """A card the deck can most afford to lose, and why."""
 
-    __slots__ = ("name", "quantity", "mana_value", "score", "reason", "roles")
+    __slots__ = ("name", "quantity", "mana_value", "reason", "roles", "tier")
 
     def __init__(self, name: str, quantity: int, mana_value: float,
-                 score: float, reason: str, roles: Sequence[str]):
+                 reason: str, roles: Sequence[str], tier: str):
         self.name = name
         self.quantity = quantity
         self.mana_value = mana_value
-        self.score = score
         self.reason = reason
         self.roles = list(roles)
+        self.tier = tier          # "dead" | "off_plan" | "redundant"
 
     def as_dict(self) -> Dict[str, object]:
         return {"name": self.name, "mana_value": self.mana_value,
-                "score": round(self.score, 2), "reason": self.reason,
-                "roles": self.roles}
+                "reason": self.reason, "roles": self.roles, "tier": self.tier}
 
 
 # What to say when a deck is short of / heavy on a given feature.
@@ -384,8 +396,8 @@ def fundamentals(analysis: DeckAnalysis,
         heavy = analysis.curve.get("6", 0) + analysis.curve.get("7+", 0)
         caveat = ""
         if analysis.commander_curve_allowance:
-            caveat = (" This already allows for your commander, which %s."
-                      % " and ".join(analysis.commander_notes))
+            caveat = (" This already allows for the fact that %s."
+                      % _join(analysis.commander_notes))
         out.append(Recommendation(
             HIGH if effective_mv > 4.0 else MEDIUM, "fundamentals",
             "Lower your curve",
@@ -608,7 +620,21 @@ def plan_roles(classification: Classification, blend_top: int = 2,
     return wanted
 
 
-def _shape_credit(entry, analysis: DeckAnalysis, wanted: set) -> float:
+def _tribe_credit(entry, analysis: DeckAnalysis, wanted: set) -> float:
+    """Whether simply being the right creature type is a real contribution.
+
+    In a tribal deck it is: a body of the chosen type turns on every lord.
+    Nothing else about a card's shape - its cost, its card type - makes a card
+    that does nothing else worth a slot.
+    """
+    if ("typal_concentration" in wanted and analysis.dominant_type
+            and analysis.dominant_type in entry.type_line):
+        return 1.0
+    return 0.0
+
+
+def _shape_credit(entry, analysis: DeckAnalysis, wanted: set,
+                  ignore: Sequence[str] = ()) -> float:
     """Credit a card for fitting the *shape* its plan asks for.
 
     Role matching alone misses this: a Big Mana deck declares a big top end,
@@ -617,6 +643,7 @@ def _shape_credit(entry, analysis: DeckAnalysis, wanted: set) -> float:
     it.
     """
     credit = 0.0
+    wanted = wanted - set(ignore)
     type_line = entry.type_line.lower()
     is_creature = "creature" in type_line.split(" // ")[0]
 
@@ -642,8 +669,7 @@ def _shape_credit(entry, analysis: DeckAnalysis, wanted: set) -> float:
 def cut_candidates(analysis: DeckAnalysis, classification: Classification,
                    blend_top: int = 2,
                    target_archetype: Optional[Archetype] = None,
-                   limit: int = 8,
-                   ceiling: Optional[float] = None) -> List[CutCandidate]:
+                   limit: int = 10) -> List[CutCandidate]:
     """The cards contributing least to what this deck is trying to do.
 
     Commander decks are a fixed 100 cards, so every "add four of these" is
@@ -664,38 +690,62 @@ def cut_candidates(analysis: DeckAnalysis, classification: Classification,
     wanted = plan_roles(classification, blend_top, target_archetype)
     plan_name = (target_archetype.name if target_archetype is not None
                  else classification.best.archetype.name)
+    nonland = analysis.nonland_count or 1
 
-    scored: List[CutCandidate] = []
+    # Which roles the deck has more of than the plan calls for.  A universally
+    # useful role only becomes cuttable once the deck is genuinely over-served:
+    # the fifth board wipe is a cut, the first one never is.
+    if target_archetype is not None:
+        target = dict(target_archetype.profile)
+    else:
+        target = blended_target(classification, blend_top)
+    oversupplied = set()
+    for key in analysis.role_counts:
+        count = analysis.role_counts.get(key, 0)
+        wanted_count = target.get(key, 0.0) * nonland
+        if key in UNIVERSAL_FLOORS:
+            wanted_count = max(wanted_count, UNIVERSAL_FLOORS[key])
+        if count - wanted_count >= 2.0:
+            oversupplied.add(key)
+
+    dead: List[CutCandidate] = []
+    off_plan: List[CutCandidate] = []
+    redundant: List[CutCandidate] = []
+
     for entry in analysis.entries:
         if entry.is_land or entry.is_commander:
             continue
-        if entry.roles & UNIVERSAL_ROLES:
-            continue
-        on_plan = len(entry.roles & wanted)
-        breadth = len(entry.roles)
+        roles = entry.roles
+        on_plan = len(roles & wanted)
         shape = _shape_credit(entry, analysis, wanted)
-        # Only genuinely expensive cards take a cost penalty, and it never
-        # outweighs doing something the deck actually wants.
-        cost_penalty = max(0.0, entry.mana_value - 4.0) * 0.5
-        score = 2.5 * on_plan + shape + 1.5 * breadth - cost_penalty
+        protected = bool((roles & UNIVERSAL_ROLES) - oversupplied)
 
-        if breadth == 0:
-            reason = "does nothing the rest of the deck can build on"
+        if not roles and _tribe_credit(entry, analysis, wanted) == 0:
+            dead.append(CutCandidate(
+                entry.name, entry.quantity, entry.mana_value,
+                "does nothing the rest of the deck can build on",
+                sorted(roles), "dead"))
+        elif protected:
+            continue          # earns its slot in any deck
+        elif roles and roles <= oversupplied:
+            redundant.append(CutCandidate(
+                entry.name, entry.quantity, entry.mana_value,
+                "you already have more %s than the plan needs, and this is one "
+                "of the more expensive ones"
+                % _join(sorted(ROLES_BY_KEY[r].label.lower()
+                               for r in roles if r in ROLES_BY_KEY)),
+                sorted(roles), "redundant"))
         elif on_plan == 0 and shape == 0:
-            reason = "nothing it does supports your %s plan" % plan_name
-        elif entry.mana_value >= 6 and on_plan <= 1:
-            reason = "expensive for the one thing it contributes"
-        else:
-            reason = "among the least connected cards to your %s plan" % plan_name
+            off_plan.append(CutCandidate(
+                entry.name, entry.quantity, entry.mana_value,
+                "nothing it does serves your %s plan" % plan_name,
+                sorted(roles), "off_plan"))
 
-        scored.append(CutCandidate(entry.name, entry.quantity,
-                                   entry.mana_value, score, reason,
-                                   sorted(entry.roles)))
+    # Within each tier the most expensive card is the first one to go.
+    for group in (dead, off_plan, redundant):
+        group.sort(key=lambda c: -c.mana_value)
 
-    scored.sort(key=lambda c: (c.score, -c.mana_value))
-    cutoff = CUT_SCORE_CEILING if ceiling is None else ceiling
-    return [c for c in scored if c.score < cutoff][:limit]
-
+    return (dead + off_plan + redundant)[:limit]
 
 
 def swap_budget(recommendations: Sequence[Recommendation]) -> int:

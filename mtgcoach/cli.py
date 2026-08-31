@@ -65,8 +65,11 @@ def cmd_analyze(args) -> int:
     recommendations = advice.all_recommendations(analysis, classification,
                                                  blend_top=args.blend,
                                                  target_archetype=target)
+    # Never propose more cuts than the advice actually needs room for.
+    needed = advice.swap_budget(recommendations)
     cuts = advice.cut_candidates(analysis, classification, blend_top=args.blend,
-                                 target_archetype=target, limit=args.cuts)
+                                 target_archetype=target,
+                                 limit=min(args.cuts, max(needed, 3)))
 
     if args.json:
         payload = report.to_json(analysis, classification, recommendations,

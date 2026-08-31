@@ -126,7 +126,10 @@ is measured on Elementals.
 **The commander is weighted up.** It is castable in every single game, so it
 says more about the deck than any one of the other 99 cards; role densities
 count it three times (`features.COMMANDER_WEIGHT`). The descriptive counts in
-the report stay honest at one card.
+the report stay honest at one card. With partners both commanders count, and
+each keeps its own identity - notes about what a commander enables are
+attributed by name rather than merged into one sentence about "your
+commander".
 
 ### Distance and partial classification
 
@@ -217,23 +220,38 @@ A Commander deck is exactly 100 cards, so every "add four of these" is also
 act on. The report totals the slots its recommendations want - the **swap
 budget** - and then answers where they come from.
 
-Role-level trims cover part of it. The rest is a ranked list of the cards
-contributing least to the plan, scored on how much each one does, how much of
-that is on plan, and what it costs to do it. Two details make the difference
-between useful and absurd:
+Role-level trims cover part of it. The rest is a ranked list of cards in three
+tiers, because "cut this" means three quite different things:
 
-- **Universally useful cards are never listed.** Ramp, draw, removal, tutors
-  and protection earn their slot in any deck. Without this rule a synergy
-  score cheerfully recommends cutting Sol Ring for being off-theme. Having
-  *too much* ramp is real, but that is a role-level trim.
+1. **Dead weight** - fills no functional role at all. The vanilla 6/6 with no
+   abilities. Always the first cut.
+2. **Off plan** - does something, but nothing the deck is trying to do.
+3. **Redundant** - on plan, but the deck already has more of that effect than
+   the plan calls for. Ranked most expensive first, since the fifth board wipe
+   should be the priciest one, not the cheapest.
+
+Within every tier the most expensive card goes first. Three rules keep this
+from producing absurd advice:
+
+- **Universally useful cards are protected.** Ramp, draw, removal, tutors and
+  protection earn their slot in any deck. Without this a synergy score
+  cheerfully recommends cutting Sol Ring for being off-theme. They become
+  cuttable only once the deck is past what *any* deck wants - not merely past
+  what one archetype prefers, or a five-colour deck gets told to cut Cultivate
+  - and then they appear as *redundant*, never as off-plan.
+- **Cost is never held against a card that serves the plan.** An expensive
+  on-plan card is a payoff, not a cut: Kindred Summons costs seven mana and
+  does exactly one thing, and that thing wins a typal game.
 - **Shape credit.** A Big Mana deck declares a big top end, but
   `top_end_share` is not a role any card can carry, so on role matching alone
   the finisher the deck exists to cast looks like it contributes nothing.
-  Cards get credit for fitting the shape their plan asks for.
+  Cards get credit for fitting the shape their plan asks for. Being expensive
+  or being a creature is not itself a contribution, though - only being the
+  right *tribe* can rescue a card that does nothing else.
 
 This is the one place the tool names specific cards, and only ever cards the
-player already owns - "what should I cut" has no useful role-level answer. If
-nothing scores badly enough, it says so rather than padding the list.
+player already owns - "what should I cut" has no useful role-level answer. The
+list never runs longer than the number of slots the advice actually needs.
 
 ## Limitations
 
@@ -256,11 +274,11 @@ nothing scores badly enough, it says so rather than padding the list.
 python3 -m unittest discover -s tests -v
 ```
 
-48 tests: parsing, role assignment, creature-type concentration, commander
-weighting and curve allowance, feature maths, legality checks, distance and
-mixture properties, blend gating, cut-candidate scoring, advice guards, plus an
-end-to-end check that each sample deck classifies as intended (skipped if the
-Scryfall cache is empty).
+60 tests: parsing, split-card identifiers, partner pairing, role assignment,
+creature-type concentration, commander weighting and curve allowance, feature
+maths, legality checks, distance and mixture properties, blend gating,
+cut-candidate tiers, advice guards, plus an end-to-end check that each sample
+deck classifies as intended (skipped if the Scryfall cache is empty).
 
 ## Layout
 
@@ -275,7 +293,7 @@ mtgcoach/
   advice.py      fundamentals and direction recommendation passes
   report.py      terminal and JSON rendering
   cli.py         argument parsing and command dispatch
-decks/           six exemplar decks plus one deliberately rough beginner deck
+decks/           seven exemplar decks plus one deliberately rough beginner deck
 tests/           unit and end-to-end tests
 ```
 

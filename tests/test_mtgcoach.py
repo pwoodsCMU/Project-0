@@ -10,7 +10,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from mtgcoach import advice, archetypes, classify, decklist, features, roles
+from mtgcoach import (advice, archetypes, classify, decklist, features, roles,
+                      scryfall)
 from mtgcoach.scryfall import normalize_name
 
 
@@ -494,6 +495,57 @@ class TestCutCandidates(unittest.TestCase):
         parsed, cards, tags = build(cards_list, text)
         return features.analyze(parsed, cards, tags)
 
+    def test_an_on_plan_payoff_is_never_a_cut(self):
+        # Kindred Summons is expensive and does one thing, but that one thing
+        # is the typal deck's game-ender.
+        cards_list = [card("Elemental %d" % i,
+                           type_line="Creature — Elemental") for i in range(20)]
+        cards_list += [
+            card("Plains", cost="", mv=0.0, type_line="Basic Land — Plains"),
+            card("Tribe Boss", type_line="Legendary Creature — Elemental"),
+            card("Kindred Summons", cost="{5}{G}{G}", mv=7.0,
+                 type_line="Instant"),
+        ]
+        text = ("// Commander\n1 Tribe Boss\n\n// Deck\n1 Kindred Summons\n"
+                + "\n".join("1 Elemental %d" % i for i in range(20))
+                + "\n36 Plains\n")
+        parsed, cards, tags = build(cards_list, text)
+        tags = {"oid-kindred-summons": ["typal", "typal-creature"]}
+        parsed, cards, _ = build(cards_list, text)
+        an = features.analyze(parsed, cards, tags)
+        entry = next(e for e in an.entries if e.name == "Kindred Summons")
+        self.assertIn("typal", entry.roles)
+        result = classify.classify(an.vector)
+        names = [c.name for c in advice.cut_candidates(an, result, limit=99)]
+        self.assertNotIn("Kindred Summons", names)
+
+    def test_oversupplied_universal_cards_are_redundant_not_off_plan(self):
+        an = self._deck([], "")
+        an.role_counts["ramp"] = 30
+        an.vector = features.build_vector(an)
+        result = classify.classify(an.vector)
+        for candidate in advice.cut_candidates(an, result, limit=99):
+            if "ramp" in candidate.roles:
+                self.assertEqual(candidate.tier, "redundant")
+
+    def test_a_tribe_member_with_no_abilities_is_not_dead_weight(self):
+        cards_list = [card("Elemental %d" % i,
+                           type_line="Creature — Elemental") for i in range(20)]
+        cards_list += [
+            card("Plains", cost="", mv=0.0, type_line="Basic Land — Plains"),
+            card("Tribe Boss", type_line="Legendary Creature — Elemental"),
+        ]
+        text = ("// Commander\n1 Tribe Boss\n\n// Deck\n"
+                + "\n".join("1 Elemental %d" % i for i in range(20))
+                + "\n36 Plains\n")
+        parsed, cards, tags = build(cards_list, text)
+        an = features.analyze(parsed, cards, tags)
+        result = classify.classify(an.vector)
+        if result.best.archetype.key == "typal":
+            dead = [c.name for c in advice.cut_candidates(an, result, limit=99)
+                    if c.tier == "dead"]
+            self.assertEqual(dead, [])
+
     def test_vanilla_fatty_is_the_first_cut(self):
         an = self._deck(
             [card("Big Dumb Lizard", cost="{5}{G}", mv=6.0,
@@ -551,6 +603,108 @@ class TestCutCandidates(unittest.TestCase):
         self.assertEqual(advice.swap_budget(recs), 4)
 
 
+class TestSplitCardIdentifiers(unittest.TestCase):
+    def test_split_names_are_sent_as_their_front_face(self):
+        # Scryfall's collection endpoint rejects the combined "A // B" name
+        # but accepts either face on its own.
+        self.assertEqual(scryfall.card_identifier("Fire // Ice"),
+                         {"name": "Fire"})
+        self.assertEqual(scryfall.card_identifier("Dusk // Dawn"),
+                         {"name": "Dusk"})
+
+    def test_single_slash_exports_are_handled(self):
+        # Some exports write "Dusk / Dawn" rather than "Dusk // Dawn".
+        self.assertEqual(scryfall.card_identifier("Dusk / Dawn"),
+                         {"name": "Dusk"})
+
+    def test_ordinary_names_are_unchanged(self):
+        self.assertEqual(scryfall.card_identifier("Sol Ring"),
+                         {"name": "Sol Ring"})
+
+    def test_slashes_inside_a_real_name_are_left_alone(self):
+        # Unglued's "Who/What/When/Where/Why" is one card, not five faces.
+        self.assertEqual(scryfall.card_identifier("Who/What/When/Where/Why"),
+                         {"name": "Who/What/When/Where/Why"})
+
+    def test_split_names_parse_out_of_a_decklist_line(self):
+        deck = decklist.parse_decklist("1 Dusk // Dawn (AKH) 210 *F*\n")
+        self.assertEqual(deck.entries[0].name, "Dusk // Dawn")
+
+
+class TestPartnerCommanders(unittest.TestCase):
+    def _legality(self, first, second, first_text="", second_text="",
+                  second_type="Legendary Creature — Human"):
+        cards_list = [
+            card("Island", cost="", mv=0.0, type_line="Basic Land — Island"),
+            card(first, type_line="Legendary Creature — Human",
+                 text=first_text),
+            card(second, type_line=second_type, text=second_text),
+        ]
+        text = ("// Commander\n1 %s\n1 %s\n\n// Deck\n1 Island\n"
+                % (first, second))
+        parsed, cards, tags = build(cards_list, text)
+        an = features.analyze(parsed, cards, tags)
+        self.assertEqual(len(an.commanders), 2)
+        return [i for i in an.legality if "paired" in i or "commanders" in i]
+
+    def test_two_partners_are_legal(self):
+        self.assertEqual(
+            self._legality("Alice", "Bob", "Partner (You can have two "
+                           "commanders if both have partner.)",
+                           "Partner (You can have two commanders if both have "
+                           "partner.)"),
+            [])
+
+    def test_two_unrelated_legends_are_flagged(self):
+        issues = self._legality("Alice", "Bob", "Flying.", "Vigilance.")
+        self.assertTrue(issues)
+        self.assertIn("cannot be paired", issues[0])
+
+    def test_partner_with_names_the_other_card(self):
+        self.assertEqual(
+            self._legality("Alice, the First", "Bob, the Second",
+                           "Partner with Bob, the Second", "Flying."),
+            [])
+
+    def test_background_pairing(self):
+        self.assertEqual(
+            self._legality("Alice", "Noble Heritage", "Choose a Background",
+                           "Commander creatures you own have vigilance.",
+                           second_type="Legendary Enchantment — Background"),
+            [])
+
+    def test_both_commanders_contribute_colour_identity(self):
+        cards_list = [
+            card("Island", cost="", mv=0.0, type_line="Basic Land — Island"),
+            card("Blue Legend", cost="{U}", mv=1.0,
+                 type_line="Legendary Creature — Human", colors=["U"],
+                 text="Partner"),
+            card("White Legend", cost="{W}", mv=1.0,
+                 type_line="Legendary Creature — Human", colors=["W"],
+                 text="Partner"),
+        ]
+        text = ("// Commander\n1 Blue Legend\n1 White Legend\n\n"
+                "// Deck\n1 Island\n")
+        parsed, cards, tags = build(cards_list, text)
+        an = features.analyze(parsed, cards, tags)
+        self.assertEqual(an.commander_identity, ["W", "U"])
+
+    def test_commander_notes_name_the_commander_they_came_from(self):
+        cards_list = [
+            card("Island", cost="", mv=0.0, type_line="Basic Land — Island"),
+            card("Discount Lord", type_line="Legendary Creature — Human",
+                 text="Partner. Creature spells you cast cost {2} less to cast."),
+            card("Plain Partner", type_line="Legendary Creature — Human",
+                 text="Partner"),
+        ]
+        text = ("// Commander\n1 Discount Lord\n1 Plain Partner\n\n"
+                "// Deck\n1 Island\n")
+        parsed, cards, tags = build(cards_list, text)
+        an = features.analyze(parsed, cards, tags)
+        self.assertEqual(len(an.commander_notes), 1)
+        self.assertTrue(an.commander_notes[0].startswith("Discount Lord"))
+
+
 class TestEndToEnd(unittest.TestCase):
     """Runs only when the Scryfall cache has already been populated."""
 
@@ -561,6 +715,7 @@ class TestEndToEnd(unittest.TestCase):
         "hearthhull_lands.txt": "lands_matter",
         "dance_of_the_elementals.txt": "typal",
         "counter_blitz.txt": "counters",
+        "thrasios_tymna_partners.txt": "control",
     }
 
     def test_sample_decks_classify_as_intended(self):
@@ -579,6 +734,7 @@ class TestEndToEnd(unittest.TestCase):
             self.assertEqual(missing, [], "%s has unknown cards" % filename)
             an = features.analyze(parsed, cards, tags)
             self.assertEqual(an.total, 100, "%s is not 100 cards" % filename)
+            self.assertTrue(an.commanders, "%s has no commander" % filename)
             self.assertEqual(an.legality, [], "%s is not legal" % filename)
             result = classify.classify(an.vector)
             self.assertEqual(result.best.archetype.key, expected,

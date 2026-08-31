@@ -34,16 +34,17 @@ COMMANDER_WEIGHT = 3
 # Commander abilities that change what a "fair" curve looks like.  A commander
 # that caps or discounts casting costs, or puts things into play directly,
 # lets the deck run cards it could never hard-cast on time.
+# (pattern, description, curve allowance in mana value)
 COMMANDER_COST_PATTERNS = [
-    (r"cost(?:s)? \{?\d+\}? less", "makes your spells cheaper"),
+    (r"cost(?:s)? \{?\d+\}? less", "makes your spells cheaper", 0.6),
     (r"gains? (?:evoke|affinity|convoke|improvise|delve|emerge)",
-     "gives your spells an alternative cost"),
+     "gives your spells an alternative cost", 0.6),
     (r"without paying (?:its|their) mana cost",
-     "casts spells without paying for them"),
+     "casts spells without paying for them", 0.6),
     (r"you may cast .{0,60}(?:from your graveyard|from exile|from the top)",
-     "casts cards from outside your hand"),
+     "casts cards from outside your hand", 0.3),
     (r"put(?:s)? .{0,60}onto the battlefield",
-     "puts permanents onto the battlefield directly"),
+     "puts permanents onto the battlefield directly", 0.3),
 ]
 
 # Shape features that sit alongside the role densities in the feature vector.
@@ -281,23 +282,25 @@ def _commander_effects(an: DeckAnalysis) -> None:
     it can support is genuinely higher than the raw average suggests.
     """
     allowance = 0.0
+    seen = set()
     for cmdr in an.commanders:
         text = cmdr.card.get("oracle_text") or ""
-        for pattern, description in COMMANDER_COST_PATTERNS:
+        found = []
+        for pattern, description, weight in COMMANDER_COST_PATTERNS:
             if re.search(pattern, text, re.IGNORECASE):
-                an.commander_notes.append(description)
-                allowance = max(allowance, 0.6)
-        if "ramp" in cmdr.roles:
-            an.commander_notes.append("accelerates your mana")
+                found.append(description)
+                allowance = max(allowance, weight)
+        if "ramp" in cmdr.roles and not found:
+            found.append("accelerates your mana")
             allowance = max(allowance, 0.4)
-    # De-duplicate while keeping order.
-    seen = set()
-    notes = []
-    for note in an.commander_notes:
-        if note not in seen:
-            seen.add(note)
-            notes.append(note)
-    an.commander_notes = notes
+        # Notes carry the commander's name: with partners, two different cards
+        # are doing two different things and must not be merged into one
+        # sentence about "your commander".
+        for description in found:
+            key = (cmdr.name, description)
+            if key not in seen:
+                seen.add(key)
+                an.commander_notes.append("%s %s" % (cmdr.name, description))
     an.commander_curve_allowance = min(0.8, allowance)
 
 
@@ -385,6 +388,50 @@ def build_vector(an: DeckAnalysis) -> Dict[str, float]:
     return vec
 
 
+def _partner_issues(an: DeckAnalysis) -> List[str]:
+    """Two commanders are only legal if the cards actually say they may pair."""
+    if len(an.commanders) < 2:
+        return []
+    if len(an.commanders) > 2:
+        return ["%d commanders listed; Commander allows at most two, and only "
+                "when the cards pair (Partner, Friends forever, a Background, "
+                "or a Doctor's companion)" % len(an.commanders)]
+
+    first, second = an.commanders
+    texts = [(c.card.get("oracle_text") or "").lower() for c in an.commanders]
+    types = [c.type_line.lower() for c in an.commanders]
+    names = [c.name.lower() for c in an.commanders]
+
+    def has_plain_partner(index: int) -> bool:
+        text = texts[index]
+        return bool(re.search(r"(^|\n)partner\b", text)
+                    and "partner with" not in text)
+
+    def partners_with_other(index: int) -> bool:
+        other = names[1 - index]
+        match = re.search(r"partner with ([^\n(]+)", texts[index])
+        if not match:
+            return False
+        # "Partner with Kydele" also matches the full "Kydele, Chosen of Kruphix".
+        named = match.group(1).strip().rstrip(".").lower()
+        return named in other or other.startswith(named)
+
+    legal = (
+        (has_plain_partner(0) and has_plain_partner(1))
+        or partners_with_other(0) or partners_with_other(1)
+        or all("friends forever" in text for text in texts)
+        or any("choose a background" in texts[i] and "background" in types[1 - i]
+               for i in (0, 1))
+        or any("doctor's companion" in texts[i] and "time lord doctor" in types[1 - i]
+               for i in (0, 1))
+    )
+    if legal:
+        return []
+    return ["%s and %s cannot be paired as commanders - two commanders need "
+            "Partner, \"Partner with\", Friends forever, a Background, or a "
+            "Doctor's companion" % (first.name, second.name)]
+
+
 def check_legality(an: DeckAnalysis, parsed_deck) -> List[str]:
     """Commander-format sanity checks a newer player is most likely to trip."""
     issues: List[str] = []
@@ -409,6 +456,8 @@ def check_legality(an: DeckAnalysis, parsed_deck) -> List[str]:
             elif not eligible:
                 issues.append("%s is legendary but is not a creature - double "
                               "check that it can be your commander" % cmdr.name)
+
+        issues.extend(_partner_issues(an))
 
         allowed = set(an.commander_identity)
         offenders = []
