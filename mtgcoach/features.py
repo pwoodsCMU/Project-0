@@ -91,6 +91,7 @@ FEATURE_WEIGHTS: Dict[str, float] = {
     "combo_enabler": 1.1,
     "lifegain": 0.5,
     "group_slug": 0.7,
+    "politics": 1.1,
     "typal": 0.7,
     "counters_matter": 1.2,
     "typal_concentration": 1.3,

@@ -42,6 +42,7 @@ BASELINE: Dict[str, float] = {
     "combo_enabler": 0.05,
     "lifegain": 0.09,
     "group_slug": 0.05,
+    "politics": 0.06,
     "typal": 0.03,
     "counters_matter": 0.10,
     "typal_concentration": 0.45,
@@ -58,13 +59,17 @@ BASELINE: Dict[str, float] = {
 class Archetype(object):
     def __init__(self, key: str, name: str, blurb: str, plan: str,
                  overrides: Dict[str, float], signature: Sequence[str],
-                 watch_out: str = ""):
+                 watch_out: str = "", signature_tags: Sequence[str] = ()):
         self.key = key
         self.name = name
         self.blurb = blurb            # one line: what the deck is
         self.plan = plan              # how it wins
         self.signature = list(signature)   # the roles that define it
         self.watch_out = watch_out
+        # Scryfall tags that, when they turn up as one of a deck's discovered
+        # themes, are direct evidence for this archetype. A trailing "-" makes
+        # it a prefix, so "typal-" catches typal-elemental and the rest.
+        self.signature_tags = list(signature_tags)
         # Features this archetype actually takes a position on.  Everything
         # else falls back to BASELINE and is treated as "no opinion", so the
         # recommender never argues from a number nobody chose.
@@ -92,7 +97,8 @@ ARCHETYPES: List[Archetype] = [
          "land_share": 0.38},
         signature=["tokens", "combat_aggro"],
         watch_out="One board wipe undoes your whole turn sequence - hold some "
-                  "creatures back and carry protection."),
+                  "creatures back and carry protection.",
+        signature_tags=['repeatable creature tokens', 'anthem', 'keyword anthem', 'attacking matters', 'token increaser']),
 
     Archetype(
         "voltron", "Voltron",
@@ -108,7 +114,8 @@ ARCHETYPES: List[Archetype] = [
          "sacrifice": 0.03, "top_end_share": 0.03},
         signature=["equipment_auras", "protection", "combat_aggro"],
         watch_out="Everything rides on one creature. Without protection and a "
-                  "backup threat, a single Swords to Plowshares ends you."),
+                  "backup threat, a single Swords to Plowshares ends you.",
+        signature_tags=['synergy-equipment', 'synergy-aura', 'quick attach', 'quick equip', 'sword of x and y', 'gives protection']),
 
     Archetype(
         "midrange_value", "Midrange Value",
@@ -140,7 +147,8 @@ ARCHETYPES: List[Archetype] = [
          "land_share": 0.42},
         signature=["counterspell", "removal_mass", "card_draw"],
         watch_out="Answering everything is not a win condition. Control decks "
-                  "lose by drawing the game out with nothing to end it."),
+                  "lose by drawing the game out with nothing to end it.",
+        signature_tags=['counterspell', 'sweeper', 'draw engine', 'remove-from-stack']),
 
     Archetype(
         "combo", "Combo",
@@ -158,7 +166,8 @@ ARCHETYPES: List[Archetype] = [
         signature=["tutor", "combo_enabler"],
         watch_out="Combo decks live and die by consistency. Too few tutors and "
                   "you never assemble; no protection and the first counterspell "
-                  "wins."),
+                  "wins.",
+        signature_tags=['storm count matters', 'storm-like', 'alternate win condition', 'cost reducer', 'untapper', 'extra turn']),
 
     Archetype(
         "stax_prison", "Stax / Prison",
@@ -174,7 +183,8 @@ ARCHETYPES: List[Archetype] = [
         signature=["stax", "tutor"],
         watch_out="You have to break the lock you build, and you have to be "
                   "able to actually finish. Also: this archetype makes games "
-                  "less fun for a casual table - read the room."),
+                  "less fun for a casual table - read the room.",
+        signature_tags=['lockdown', 'tax', 'rule of law', 'stasis', 'pillowfort', 'hatebear', 'cost increaser']),
 
     Archetype(
         "big_mana", "Big Mana / Ramp",
@@ -189,7 +199,8 @@ ARCHETYPES: List[Archetype] = [
          "low_curve_share": 0.30, "land_share": 0.42, "tutor": 0.06},
         signature=["ramp", "top_end_share"],
         watch_out="Ramping into nothing is the classic failure. Every ramp "
-                  "spell needs a payoff worth the two turns you spent."),
+                  "spell needs a payoff worth the two turns you spent.",
+        signature_tags=['mana increaser', 'adds multiple mana', 'high mana value matters', 'eldrazi titan', 'mana value matters']),
 
     Archetype(
         "lands_matter", "Lands Matter",
@@ -205,7 +216,8 @@ ARCHETYPES: List[Archetype] = [
          "noncreature_permanent_share": 0.14},
         signature=["lands_matter", "ramp", "recursion"],
         watch_out="Land ramp is not card advantage on its own. Make sure the "
-                  "landfall payoffs actually threaten to win."),
+                  "landfall payoffs actually threaten to win.",
+        signature_tags=['landfall', 'lands matter', 'land ramp', 'crucible of worlds', 'sacrifice outlet-land', 'lands in graveyard matter']),
 
     Archetype(
         "aristocrats", "Aristocrats / Sacrifice",
@@ -220,7 +232,8 @@ ARCHETYPES: List[Archetype] = [
          "low_curve_share": 0.45, "avg_mv_norm": 0.42, "land_share": 0.38},
         signature=["sacrifice", "tokens", "group_slug"],
         watch_out="You need all three legs: a free outlet, a stream of bodies, "
-                  "and a drain payoff. Missing one and the deck does nothing."),
+                  "and a drain payoff. Missing one and the deck does nothing.",
+        signature_tags=['sacrifice outlet', 'death trigger', 'your sacrifice matters', 'drain life', 'sacrifice matters']),
 
     Archetype(
         "reanimator", "Graveyard / Reanimator",
@@ -236,7 +249,8 @@ ARCHETYPES: List[Archetype] = [
          "removal_mass": 0.06},
         signature=["graveyard_matters", "recursion"],
         watch_out="Graveyard hate is common and hits you hardest. Keep a plan "
-                  "that works with an empty graveyard."),
+                  "that works with an empty graveyard.",
+        signature_tags=['reanimate', 'mass reanimation', 'graveyard fuel', 'mill-self', 'discard outlet', 'cards in graveyard matter']),
 
     Archetype(
         "spellslinger", "Spellslinger",
@@ -252,7 +266,8 @@ ARCHETYPES: List[Archetype] = [
          "graveyard_matters": 0.10, "group_slug": 0.10},
         signature=["instant_sorcery_share", "card_draw"],
         watch_out="Spell payoffs are fragile creatures. If they keep dying "
-                  "before you untap, you are just playing a pile of cantrips."),
+                  "before you untap, you are just playing a pile of cantrips.",
+        signature_tags=['synergy-instant', 'synergy-sorcery', 'copy-spell', 'cast trigger', 'single target instant/sorcery']),
 
     Archetype(
         "counters", "+1/+1 Counters",
@@ -268,7 +283,8 @@ ARCHETYPES: List[Archetype] = [
         signature=["counters_matter", "creature_share"],
         watch_out="Counters are card advantage stored on a creature, which "
                   "makes each creature a bigger loss. Carry protection, and "
-                  "make sure something makes the board wide as well as tall."),
+                  "make sure something makes the board wide as well as tall.",
+        signature_tags=['counters matter', 'pp counters matter', 'counter increaser', 'repeatable-proliferate', 'gives pp counters']),
 
     Archetype(
         "typal", "Typal / Tribal",
@@ -282,7 +298,28 @@ ARCHETYPES: List[Archetype] = [
          "noncreature_permanent_share": 0.24, "removal_mass": 0.04},
         signature=["typal_concentration", "typal", "creature_share"],
         watch_out="Typal decks routinely run creatures that are only playable "
-                  "because of their type. Cut the weakest ones for interaction."),
+                  "because of their type. Cut the weakest ones for interaction.",
+        signature_tags=["typal-", "typal coupling", "noncreature typal", "typal"]),
+
+    Archetype(
+        "group_hug", "Group Hug / Politics",
+        "Gives the whole table resources, then profits from being the player "
+        "nobody wants to attack.",
+        "Hand out cards and mana, stay the least threatening player at the "
+        "table, and win once everyone else has worn each other down.",
+        {"politics": 0.40, "card_draw": 0.35, "creature_share": 0.20,
+         "noncreature_permanent_share": 0.42, "instant_sorcery_share": 0.28,
+         "removal_spot": 0.10, "removal_mass": 0.06, "ramp": 0.20,
+         "lifegain": 0.15, "protection": 0.14, "stax": 0.12, "tokens": 0.10,
+         "combat_aggro": 0.14, "avg_mv_norm": 0.48, "low_curve_share": 0.42,
+         "land_share": 0.40},
+        signature=["politics", "card_draw"],
+        watch_out="Handing the table resources speeds everyone up, including "
+                  "the deck that beats you. Group hug needs a way to actually "
+                  "end the game, or it just decides who wins.",
+        signature_tags=["group hug", "selective group hug", "force draw",
+                        "opponent lifegain", "voting", "monarch matters",
+                        "multiplayer"]),
 ]
 
 ARCHETYPES_BY_KEY: Dict[str, Archetype] = {a.key: a for a in ARCHETYPES}
@@ -310,9 +347,13 @@ def load_profiles(path: str) -> None:
                     setattr(existing, attr, spec[attr])
             if spec.get("signature"):
                 existing.signature = list(spec["signature"])
+            if spec.get("signature_tags"):
+                existing.signature_tags = list(spec["signature_tags"])
         else:
             arch = Archetype(key, spec.get("name", key), spec.get("blurb", ""),
                              spec.get("plan", ""), profile,
-                             spec.get("signature", []), spec.get("watch_out", ""))
+                             spec.get("signature", []), spec.get("watch_out", "",
+        signature_tags=['typal-', 'typal coupling', 'noncreature typal', 'typal']),
+                             spec.get("signature_tags", []))
             ARCHETYPES.append(arch)
             ARCHETYPES_BY_KEY[key] = arch

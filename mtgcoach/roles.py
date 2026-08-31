@@ -223,8 +223,10 @@ ROLES: List[Role] = [
     Role("politics", "Politics / multiplayer levers",
          "Group hug, voting, goad, monarch, theft - table-facing effects.",
          tags=["group hug", "selective group hug", "voting", "monarch matters",
-               "multiplayer", "theft", "control changing effects"],
-         text=r"(goad|becomes? the monarch|vote|gain control of target)"),
+               "multiplayer", "theft", "control changing effects", "force draw",
+               "opponent lifegain"],
+         text=r"(goad|becomes? the monarch|vote|gain control of target)",
+         axis=True),
 
     Role("mill_opponent", "Mill",
          "Attacks opposing libraries.",

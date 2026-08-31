@@ -61,7 +61,7 @@ def cmd_analyze(args) -> int:
                              "archetypes')" % args.target)
 
     _, analysis, label = _load_analysis(args.deck, args)
-    classification = classify.classify(analysis.vector)
+    classification = classify.classify(analysis.vector, themes=analysis.themes)
     recommendations = advice.all_recommendations(analysis, classification,
                                                  blend_top=args.blend,
                                                  target_archetype=target)

@@ -207,9 +207,13 @@ def render(analysis: DeckAnalysis, classification: Classification,
     add(st.dim("  affinity = share of the deck's identity; fit = how close the "
                "match is"))
     for match in classification.top(show_archetypes):
-        add("  %-24s %5.1f%%  fit %3.0f%%  d=%.3f  %s"
-            % (match.archetype.name, 100 * match.affinity, 100 * match.fit,
-               match.distance, bar(match.affinity, 1.0, 20)))
+        supported = " *" if match.theme_support >= 0.25 else ""
+        add("  %-22s%2s %5.1f%%  fit %3.0f%%  d=%.3f  %s"
+            % (match.archetype.name, supported, 100 * match.affinity,
+               100 * match.fit, match.distance, bar(match.affinity, 1.0, 20)))
+    if any(m.theme_support >= 0.25 for m in classification.top(show_archetypes)):
+        add(st.dim("  * backed by the themes found in your cards, not just by "
+                   "what your cards do"))
     add("")
     best = classification.best
     if target is not None and target.key != best.archetype.key:
@@ -397,7 +401,8 @@ def to_json(analysis: DeckAnalysis, classification: Classification,
                  "distance": round(m.distance, 4),
                  "affinity": round(m.affinity, 4),
                  "fit": round(m.fit, 4),
-                 "cosine": round(m.cosine, 4)}
+                 "cosine": round(m.cosine, 4),
+                 "theme_support": round(m.theme_support, 3)}
                 for m in classification.matches
             ],
         },

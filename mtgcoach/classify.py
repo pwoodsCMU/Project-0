@@ -30,13 +30,23 @@ TEMPERATURE = 0.025
 # A deck this far from every archetype has no recognisable plan at all.
 MAX_MEANINGFUL_DISTANCE = 0.20
 
+# How far a fully-supported theme match can pull an archetype closer.  The
+# feature vector measures what a deck's cards do; the discovered themes say
+# what the deck is *about*, which is independent evidence - a deck whose
+# strongest theme is "group hug" is a group hug deck however its role
+# densities happen to fall.
+THEME_PULL = 0.25
+
 
 class Match(object):
-    __slots__ = ("archetype", "distance", "affinity", "cosine", "gaps")
+    __slots__ = ("archetype", "distance", "affinity", "cosine", "gaps",
+                 "theme_support")
 
     def __init__(self, archetype: Archetype, distance: float, affinity: float,
-                 cosine: float, gaps: Dict[str, float]):
+                 cosine: float, gaps: Dict[str, float],
+                 theme_support: float = 0.0):
         self.archetype = archetype
+        self.theme_support = theme_support   # 0..1 from the deck's own themes
         self.distance = distance
         self.affinity = affinity          # 0..1, sums to 1 across archetypes
         self.cosine = cosine
@@ -109,11 +119,27 @@ def cosine(deck_vector: Dict[str, float], profile: Dict[str, float]) -> float:
     return dot / math.sqrt(num_a * num_b)
 
 
+def theme_support(archetype: Archetype, themes: Sequence) -> float:
+    """0..1 - how much of the deck's discovered theme weight this archetype names."""
+    if not themes or not archetype.signature_tags:
+        return 0.0
+    exact = {t for t in archetype.signature_tags if not t.endswith("-")}
+    prefixes = tuple(t for t in archetype.signature_tags if t.endswith("-"))
+    support = 0.0
+    for theme in themes:
+        if theme.label in exact or (prefixes and theme.label.startswith(prefixes)):
+            support += theme.weight
+    return min(1.0, support)
+
+
 def classify(deck_vector: Dict[str, float],
              archetypes: Optional[Sequence[Archetype]] = None,
-             temperature: float = TEMPERATURE) -> Classification:
+             temperature: float = TEMPERATURE,
+             themes: Optional[Sequence] = None) -> Classification:
     pool = list(archetypes if archetypes is not None else ARCHETYPES)
-    distances = [(a, distance(deck_vector, a.profile)) for a in pool]
+    supports = {a.key: theme_support(a, themes or ()) for a in pool}
+    distances = [(a, distance(deck_vector, a.profile)
+                  * (1.0 - THEME_PULL * supports[a.key])) for a in pool]
     best = min(d for _, d in distances)
 
     exps = [math.exp(-(d - best) / temperature) for _, d in distances]
@@ -124,7 +150,8 @@ def classify(deck_vector: Dict[str, float],
         gaps = {name: arch.profile.get(name, 0.0) - deck_vector.get(name, 0.0)
                 for name in FEATURE_NAMES}
         matches.append(Match(arch, dist, weight / total,
-                             cosine(deck_vector, arch.profile), gaps))
+                             cosine(deck_vector, arch.profile), gaps,
+                             supports[arch.key]))
     matches.sort(key=lambda m: m.distance)
     return Classification(matches)
 

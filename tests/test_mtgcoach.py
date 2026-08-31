@@ -978,6 +978,49 @@ class TestSynergyThemes(unittest.TestCase):
         self.assertNotIn("Spell 0", names)
 
 
+class TestThemesFeedClassification(unittest.TestCase):
+    def test_theme_support_matches_signature_tags(self):
+        voltron = archetypes.ARCHETYPES_BY_KEY["voltron"]
+        themes = [synergy.Theme("synergy-equipment", 8, 20.0, 1.0)]
+        self.assertGreater(classify.theme_support(voltron, themes), 0.9)
+        control = archetypes.ARCHETYPES_BY_KEY["control"]
+        self.assertEqual(classify.theme_support(control, themes), 0.0)
+
+    def test_prefix_signature_tags_match_a_family(self):
+        typal = archetypes.ARCHETYPES_BY_KEY["typal"]
+        themes = [synergy.Theme("typal-elemental", 10, 120.0, 1.0)]
+        self.assertGreater(classify.theme_support(typal, themes), 0.9)
+
+    def test_themes_pull_a_deck_toward_the_archetype_they_name(self):
+        # Themes are evidence, not an override: they move an archetype up the
+        # ranking rather than winning outright from any distance.
+        aggro = archetypes.ARCHETYPES_BY_KEY["go_wide_aggro"].profile
+        control = archetypes.ARCHETYPES_BY_KEY["control"].profile
+        midpoint = {k: (aggro[k] + control[k]) / 2.0 for k in aggro}
+
+        def rank_of(result, key):
+            return [m.archetype.key for m in result.matches].index(key)
+
+        plain = classify.classify(midpoint)
+        themed = classify.classify(
+            midpoint, themes=[synergy.Theme("counterspell", 9, 30.0, 1.0)])
+        self.assertLessEqual(rank_of(themed, "control"),
+                             rank_of(plain, "control"))
+        self.assertGreater(
+            next(m for m in themed.matches if m.archetype.key == "control").affinity,
+            next(m for m in plain.matches if m.archetype.key == "control").affinity)
+
+    def test_themes_only_help_they_never_hurt(self):
+        # Theme support shortens a distance; it can never lengthen one.
+        profile = dict(archetypes.ARCHETYPES_BY_KEY["voltron"].profile)
+        plain = classify.classify(profile)
+        themed = classify.classify(
+            profile, themes=[synergy.Theme("synergy-equipment", 8, 20.0, 1.0)])
+        for a, b in zip(plain.matches, themed.matches):
+            if a.archetype.key == b.archetype.key:
+                self.assertLessEqual(b.distance, a.distance + 1e-9)
+
+
 class TestEndToEnd(unittest.TestCase):
     """Runs only when the Scryfall cache has already been populated."""
 
@@ -989,6 +1032,8 @@ class TestEndToEnd(unittest.TestCase):
         "dance_of_the_elementals.txt": "typal",
         "counter_blitz.txt": "counters",
         "thrasios_tymna_partners.txt": "control",
+        "peace_offering.txt": "group_hug",
+        "prismari_artistry.txt": "spellslinger",
     }
 
     def test_sample_decks_classify_as_intended(self):
@@ -1009,7 +1054,7 @@ class TestEndToEnd(unittest.TestCase):
             self.assertEqual(an.total, 100, "%s is not 100 cards" % filename)
             self.assertTrue(an.commanders, "%s has no commander" % filename)
             self.assertEqual(an.legality, [], "%s is not legal" % filename)
-            result = classify.classify(an.vector)
+            result = classify.classify(an.vector, themes=an.themes)
             self.assertEqual(result.best.archetype.key, expected,
                              "%s classified as %s" % (filename,
                                                       result.best.archetype.key))
