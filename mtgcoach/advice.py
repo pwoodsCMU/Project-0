@@ -20,7 +20,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .archetypes import Archetype
-from .classify import Classification, blended_target
+from .classify import Classification, blend_matches, blended_target
 from .features import (COLOR_NAMES, DeckAnalysis, FEATURE_NAMES,
                        FEATURE_WEIGHTS)
 from .roles import ROLES_BY_KEY
@@ -31,9 +31,24 @@ _PRIORITY_ORDER = {HIGH: 0, MEDIUM: 1, LOW: 2}
 # Roles almost no Commander deck regrets having more of.
 NEVER_TRIM = frozenset(["card_draw", "removal_spot", "protection"])
 
+# Roles that earn a card its slot in any deck, whatever the plan is.  Without
+# this, a synergy score cheerfully recommends cutting Sol Ring for being
+# off-theme.
+UNIVERSAL_ROLES = frozenset([
+    "ramp", "card_draw", "tutor", "removal_spot", "removal_mass",
+    "counterspell", "protection",
+])
+
+# Above this score a card is pulling its weight; listing it as a cut would be
+# noise rather than advice.
+CUT_SCORE_CEILING = 3.0
+
 # "You have too much of X" needs a much bigger gap than "you need more X"
 # before it is worth saying - over-investment is usually the deck's identity.
-TRIM_GAP = 0.11
+TRIM_GAP = 0.08
+
+# Absolute floor on a gap worth mentioning, in share-of-spells terms.
+MIN_GAP = 0.05
 
 
 def color_sources_needed(pips: int) -> int:
@@ -42,19 +57,43 @@ def color_sources_needed(pips: int) -> int:
 
 
 class Recommendation(object):
-    __slots__ = ("priority", "kind", "title", "detail", "evidence")
+    __slots__ = ("priority", "kind", "title", "detail", "evidence", "cards")
 
     def __init__(self, priority: str, kind: str, title: str, detail: str,
-                 evidence: str = ""):
+                 evidence: str = "", cards: int = 0):
         self.priority = priority
         self.kind = kind              # "mana" | "fundamentals" | "direction" | "focus"
         self.title = title
         self.detail = detail
         self.evidence = evidence
+        # Signed slot count: positive means "find room for this many cards",
+        # negative means "this many slots come free".
+        self.cards = cards
 
-    def as_dict(self) -> Dict[str, str]:
+    def as_dict(self) -> Dict[str, object]:
         return {"priority": self.priority, "kind": self.kind, "title": self.title,
-                "detail": self.detail, "evidence": self.evidence}
+                "detail": self.detail, "evidence": self.evidence,
+                "cards": self.cards}
+
+
+class CutCandidate(object):
+    """A card the deck can most afford to lose, and why."""
+
+    __slots__ = ("name", "quantity", "mana_value", "score", "reason", "roles")
+
+    def __init__(self, name: str, quantity: int, mana_value: float,
+                 score: float, reason: str, roles: Sequence[str]):
+        self.name = name
+        self.quantity = quantity
+        self.mana_value = mana_value
+        self.score = score
+        self.reason = reason
+        self.roles = list(roles)
+
+    def as_dict(self) -> Dict[str, object]:
+        return {"name": self.name, "mana_value": self.mana_value,
+                "score": round(self.score, 2), "reason": self.reason,
+                "roles": self.roles}
 
 
 # What to say when a deck is short of / heavy on a given feature.
@@ -402,6 +441,17 @@ def direction(analysis: DeckAnalysis, classification: Classification,
     identity: set = set()
     declared: set = set()
 
+    # Noise floor, scaled to how well the deck already matches. A deck sitting
+    # 0.05 from its archetype varies from the profile by that much on an
+    # average feature, so reporting smaller deviations than that manufactures
+    # work rather than finding it.
+    floor = max(MIN_GAP, classification.best.distance * 0.6)
+
+    # Whatever the commander does is the deck's identity by definition - it is
+    # the one card every game starts with. Never advise trimming it away.
+    for cmdr in analysis.commanders:
+        identity.update(cmdr.roles)
+
     if target_archetype is not None:
         target = dict(target_archetype.profile)
         blend_label = target_archetype.name
@@ -409,8 +459,8 @@ def direction(analysis: DeckAnalysis, classification: Classification,
         declared.update(target_archetype.declared)
     else:
         target = blended_target(classification, blend_top)
-        blend_label = " / ".join(m.archetype.name
-                                 for m in classification.top(blend_top))
+        blend_label = " / ".join(m.archetype.name for m in
+                                 blend_matches(classification, blend_top))
         # Anything that defines one of the deck's own top matches is part of
         # its identity, so never tell the player to cut it.
         for match in classification.top(max(blend_top, 3)):
@@ -436,8 +486,7 @@ def direction(analysis: DeckAnalysis, classification: Classification,
         # everything else is baseline filler, not a real signal.
         if name not in declared:
             continue
-        # Ignore differences smaller than ~2 cards; they are noise.
-        if abs(gap) * nonland < 2.0 or score < 0.03:
+        if abs(gap) < floor or abs(gap) * nonland < 2.0 or score < 0.03:
             continue
         if gap < 0 and (name in NEVER_TRIM or name in identity
                         or abs(gap) < TRIM_GAP):
@@ -456,7 +505,8 @@ def direction(analysis: DeckAnalysis, classification: Classification,
         evidence = "%s: %.0f%% of your spells vs %.0f%% for %s" % (
             label, 100 * analysis.vector.get(name, 0.0),
             100 * target.get(name, 0.0), blend_label)
-        out.append(Recommendation(priority, "direction", title, detail, evidence))
+        out.append(Recommendation(priority, "direction", title, detail, evidence,
+                                  cards=int(round(gap * nonland))))
 
     out.sort(key=lambda r: _PRIORITY_ORDER[r.priority])
     return out
@@ -532,6 +582,125 @@ def focus_note(analysis: DeckAnalysis, classification: Classification,
 
     out.sort(key=lambda r: _PRIORITY_ORDER[r.priority])
     return out
+
+
+def plan_roles(classification: Classification, blend_top: int = 2,
+               target_archetype: Optional[Archetype] = None) -> set:
+    """The role features the deck's plan actively wants more of than average.
+
+    A role only counts as "on plan" if the archetype takes a position on it
+    *and* asks for more of it than a generic deck carries - otherwise every
+    archetype would want a bit of everything and nothing would be off-plan.
+    """
+    from .archetypes import BASELINE
+
+    if target_archetype is not None:
+        pool = [target_archetype]
+    else:
+        pool = [m.archetype for m in blend_matches(classification, blend_top)]
+
+    wanted = set()
+    for arch in pool:
+        wanted.update(arch.signature)
+        for name in arch.declared:
+            if arch.profile.get(name, 0.0) > BASELINE.get(name, 0.0) * 1.05:
+                wanted.add(name)
+    return wanted
+
+
+def _shape_credit(entry, analysis: DeckAnalysis, wanted: set) -> float:
+    """Credit a card for fitting the *shape* its plan asks for.
+
+    Role matching alone misses this: a Big Mana deck declares a big top end,
+    but "top_end_share" is not a role any card can carry, so without this a
+    finisher looks like it contributes nothing to the plan that exists to cast
+    it.
+    """
+    credit = 0.0
+    type_line = entry.type_line.lower()
+    is_creature = "creature" in type_line.split(" // ")[0]
+
+    if "top_end_share" in wanted and entry.mana_value >= 6:
+        credit += 1.0
+    if "low_curve_share" in wanted and entry.mana_value <= 2:
+        credit += 1.0
+    if "creature_share" in wanted and is_creature:
+        credit += 1.0
+    if "instant_sorcery_share" in wanted and (
+            "instant" in type_line or "sorcery" in type_line):
+        credit += 1.0
+    if "noncreature_permanent_share" in wanted and not is_creature and any(
+            word in type_line for word in ("artifact", "enchantment",
+                                           "planeswalker")):
+        credit += 1.0
+    if ("typal_concentration" in wanted and analysis.dominant_type
+            and analysis.dominant_type in entry.type_line):
+        credit += 1.0
+    return credit
+
+
+def cut_candidates(analysis: DeckAnalysis, classification: Classification,
+                   blend_top: int = 2,
+                   target_archetype: Optional[Archetype] = None,
+                   limit: int = 8,
+                   ceiling: Optional[float] = None) -> List[CutCandidate]:
+    """The cards contributing least to what this deck is trying to do.
+
+    Commander decks are a fixed 100 cards, so every "add four of these" is
+    also "cut four of those". Rather than guess, this scores each card on how
+    much it does at all, how much of that is on plan, and what it costs to do
+    it - then hands back the weakest, with the reason attached.
+
+    This is the one place the tool names specific cards, and only ever cards
+    the player already owns: "what should I cut" has no useful role-level
+    answer.
+
+    Cards filling a universally useful role - ramp, draw, removal, tutors,
+    protection - are never listed here whatever the plan is. Sol Ring is not a
+    cut candidate because a counters deck would rather have a counters card.
+    Having *too much* ramp is real, but it is a role-level trim, which the
+    direction pass handles.
+    """
+    wanted = plan_roles(classification, blend_top, target_archetype)
+    plan_name = (target_archetype.name if target_archetype is not None
+                 else classification.best.archetype.name)
+
+    scored: List[CutCandidate] = []
+    for entry in analysis.entries:
+        if entry.is_land or entry.is_commander:
+            continue
+        if entry.roles & UNIVERSAL_ROLES:
+            continue
+        on_plan = len(entry.roles & wanted)
+        breadth = len(entry.roles)
+        shape = _shape_credit(entry, analysis, wanted)
+        # Only genuinely expensive cards take a cost penalty, and it never
+        # outweighs doing something the deck actually wants.
+        cost_penalty = max(0.0, entry.mana_value - 4.0) * 0.5
+        score = 2.5 * on_plan + shape + 1.5 * breadth - cost_penalty
+
+        if breadth == 0:
+            reason = "does nothing the rest of the deck can build on"
+        elif on_plan == 0 and shape == 0:
+            reason = "nothing it does supports your %s plan" % plan_name
+        elif entry.mana_value >= 6 and on_plan <= 1:
+            reason = "expensive for the one thing it contributes"
+        else:
+            reason = "among the least connected cards to your %s plan" % plan_name
+
+        scored.append(CutCandidate(entry.name, entry.quantity,
+                                   entry.mana_value, score, reason,
+                                   sorted(entry.roles)))
+
+    scored.sort(key=lambda c: (c.score, -c.mana_value))
+    cutoff = CUT_SCORE_CEILING if ceiling is None else ceiling
+    return [c for c in scored if c.score < cutoff][:limit]
+
+
+
+def swap_budget(recommendations: Sequence[Recommendation]) -> int:
+    """Net number of slots the advice above needs the player to find."""
+    return sum(r.cards for r in recommendations if r.cards > 0)
 
 
 def all_recommendations(analysis: DeckAnalysis,

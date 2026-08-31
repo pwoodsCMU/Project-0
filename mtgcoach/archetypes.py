@@ -280,7 +280,7 @@ ARCHETYPES: List[Archetype] = [
          "tutor": 0.06, "ramp": 0.17, "low_curve_share": 0.45,
          "avg_mv_norm": 0.44, "instant_sorcery_share": 0.20,
          "noncreature_permanent_share": 0.24, "removal_mass": 0.04},
-        signature=["typal", "creature_share"],
+        signature=["typal_concentration", "typal", "creature_share"],
         watch_out="Typal decks routinely run creatures that are only playable "
                   "because of their type. Cut the weakest ones for interaction."),
 ]

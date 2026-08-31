@@ -6,7 +6,8 @@ import os
 import sys
 from typing import Dict, List, Optional, Sequence
 
-from .advice import Recommendation, color_sources_needed, recommended_lands
+from .advice import (CutCandidate, Recommendation, color_sources_needed,
+                     recommended_lands, swap_budget)
 from .classify import Classification
 from .features import (COLOR_NAMES, COLORS, CURVE_BUCKETS, DeckAnalysis,
                        FEATURE_NAMES)
@@ -59,7 +60,7 @@ def render(analysis: DeckAnalysis, classification: Classification,
            recommendations: Sequence[Recommendation],
            deck_name: str = "", show_roles: int = 12,
            show_archetypes: int = 6, style: Optional[Style] = None,
-           target=None) -> str:
+           target=None, cuts: Sequence[CutCandidate] = ()) -> str:
     st = style or Style(False)
     out: List[str] = []
     add = out.append
@@ -210,7 +211,47 @@ def render(analysis: DeckAnalysis, classification: Classification,
             for line in wrap(rec.detail, indent=6):
                 add(line)
         if rec.evidence:
-            add(st.dim("      (%s)" % rec.evidence))
+            for line in wrap("(%s)" % rec.evidence, indent=6):
+                add(st.dim(line))
+        add("")
+
+    # ---- what to cut ----------------------------------------------------- #
+    needed = swap_budget(recommendations)
+    freed = -sum(r.cards for r in recommendations if r.cards < 0)
+    if needed >= 2:
+        add(_rule("WHERE THE ROOM COMES FROM", st))
+        remaining = max(0, needed - freed)
+        summary = ("The recommendations above want about %d slots. A Commander "
+                   "deck is a fixed 100 cards, so that is also %d cards to cut."
+                   % (needed, needed))
+        if freed:
+            summary += (" The trims above free about %d, leaving %d to find."
+                        % (freed, remaining))
+        for line in wrap(summary, indent=2):
+            add(line)
+        add("")
+        if not cuts:
+            for line in wrap("Every card here either serves the plan or is "
+                             "useful in any deck, so there is no dead weight "
+                             "to point at. The room has to come from the "
+                             "role-level trims above, or from deciding which "
+                             "of your themes to drop.", indent=2):
+                add(line)
+            add("")
+            return "\n".join(out)
+        add("  These contribute least to your plan - work down until it balances:")
+        for candidate in cuts:
+            add("    %-32s %s" % (
+                candidate.name[:32],
+                ("MV %.0f" % candidate.mana_value) if candidate.mana_value else "MV 0"))
+            for line in wrap(candidate.reason, indent=8):
+                add(st.dim(line))
+        add("")
+        for line in wrap("This is a starting list, not a verdict - it measures "
+                         "how well each card connects to the plan, not how "
+                         "strong the card is. A card you keep for fun stays.",
+                         indent=2):
+            add(st.dim(line))
         add("")
 
     # ---- footnotes ------------------------------------------------------- #
@@ -268,7 +309,8 @@ def render_roles(style: Optional[Style] = None) -> str:
 
 def to_json(analysis: DeckAnalysis, classification: Classification,
             recommendations: Sequence[Recommendation],
-            deck_name: str = "", target=None) -> Dict:
+            deck_name: str = "", target=None,
+            cuts: Sequence[CutCandidate] = ()) -> Dict:
     return {
         "deck": deck_name,
         "target_archetype": target.key if target is not None else None,
@@ -311,6 +353,8 @@ def to_json(analysis: DeckAnalysis, classification: Classification,
             ],
         },
         "recommendations": [r.as_dict() for r in recommendations],
+        "swap_budget": swap_budget(recommendations),
+        "cut_candidates": [c.as_dict() for c in cuts],
         "legality": list(analysis.legality),
         "unresolved": list(analysis.unresolved),
     }

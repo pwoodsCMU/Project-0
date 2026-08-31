@@ -65,10 +65,12 @@ def cmd_analyze(args) -> int:
     recommendations = advice.all_recommendations(analysis, classification,
                                                  blend_top=args.blend,
                                                  target_archetype=target)
+    cuts = advice.cut_candidates(analysis, classification, blend_top=args.blend,
+                                 target_archetype=target, limit=args.cuts)
 
     if args.json:
         payload = report.to_json(analysis, classification, recommendations,
-                                 label, target=target)
+                                 label, target=target, cuts=cuts)
         text = json.dumps(payload, indent=2)
         if args.json == "-":
             print(text)
@@ -80,12 +82,13 @@ def cmd_analyze(args) -> int:
             print(report.render(analysis, classification, recommendations, label,
                                 show_roles=args.roles, show_archetypes=args.top,
                                 style=report.Style(_use_color(args)),
-                                target=target))
+                                target=target, cuts=cuts))
         return 0
 
     print(report.render(analysis, classification, recommendations, label,
                         show_roles=args.roles, show_archetypes=args.top,
-                        style=report.Style(_use_color(args)), target=target))
+                        style=report.Style(_use_color(args)), target=target,
+                        cuts=cuts))
     return 0
 
 
@@ -187,6 +190,8 @@ def build_parser() -> argparse.ArgumentParser:
                          help="how many archetypes to list (default 6)")
     analyze.add_argument("--roles", type=int, default=12,
                          help="how many roles to list (default 12)")
+    analyze.add_argument("--cuts", type=int, default=8,
+                         help="how many cut candidates to list (default 8)")
     analyze.add_argument("--blend", type=int, default=2,
                          help="how many archetypes to blend into the target "
                               "profile (default 2)")

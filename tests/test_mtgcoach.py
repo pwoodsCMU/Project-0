@@ -412,6 +412,28 @@ class TestAdvice(unittest.TestCase):
         self.assertTrue(any("does not read as Voltron" in t for t in titles),
                         titles)
 
+    def test_commander_roles_are_protected_from_trim_advice(self):
+        # Ashling makes Elemental tokens, so "trim token makers" is advice
+        # against the deck's own commander.
+        cards_list = [
+            card("Plains", cost="", mv=0.0, type_line="Basic Land — Plains"),
+            card("Token Boss", type_line="Legendary Creature — Elemental",
+                 text="Whenever you sacrifice a nontoken Elemental, create a "
+                      "token that's a copy of it."),
+        ]
+        cards_list += [card("Maker %d" % i, type_line="Creature — Elemental",
+                            text="Create a 1/1 Elemental creature token.")
+                       for i in range(20)]
+        text = ("// Commander\n1 Token Boss\n\n// Deck\n"
+                + "\n".join("1 Maker %d" % i for i in range(20))
+                + "\n36 Plains\n")
+        parsed, cards, tags = build(cards_list, text)
+        an = features.analyze(parsed, cards, tags)
+        self.assertIn("tokens", an.commanders[0].roles)
+        result = classify.classify(an.vector)
+        titles = [r.title for r in advice.direction(an, result)]
+        self.assertNotIn("Trim token makers", titles)
+
     def test_split_plan_note_needs_a_real_second_plan(self):
         # A deck that is 60/10 has a clear plan even if entropy over a dozen
         # archetypes reads low; it must not be told it is split.
@@ -430,6 +452,103 @@ class TestAdvice(unittest.TestCase):
         self.assertEqual(len(titles), len(set(titles)))
         priorities = [advice._PRIORITY_ORDER[r.priority] for r in recs]
         self.assertEqual(priorities, sorted(priorities))
+
+
+class TestBlendGating(unittest.TestCase):
+    def test_a_focused_deck_blends_only_itself(self):
+        # Voltron's runner-up is a poor match, so it must not dilute the target.
+        result = classify.classify(
+            dict(archetypes.ARCHETYPES_BY_KEY["voltron"].profile))
+        kept = classify.blend_matches(result, 2)
+        self.assertEqual([m.archetype.key for m in kept], ["voltron"])
+        target = classify.blended_target(result, 2)
+        self.assertEqual(target,
+                         archetypes.ARCHETYPES_BY_KEY["voltron"].profile)
+
+    def test_a_genuine_hybrid_keeps_both_halves(self):
+        control = archetypes.ARCHETYPES_BY_KEY["control"].profile
+        spells = archetypes.ARCHETYPES_BY_KEY["spellslinger"].profile
+        midpoint = {k: (control[k] + spells[k]) / 2.0 for k in control}
+        result = classify.classify(midpoint)
+        kept = classify.blend_matches(result, 2)
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(sorted(m.archetype.key for m in kept),
+                         ["control", "spellslinger"])
+
+    def test_runner_up_must_clear_both_floors(self):
+        result = classify.classify(
+            dict(archetypes.ARCHETYPES_BY_KEY["voltron"].profile))
+        second = result.matches[1]
+        self.assertTrue(second.affinity < classify.BLEND_MIN_AFFINITY
+                        or second.fit < classify.BLEND_MIN_FIT)
+
+
+class TestCutCandidates(unittest.TestCase):
+    def _deck(self, extra_cards, extra_lines, commander="Big Mana Boss"):
+        cards_list = [
+            card("Plains", cost="", mv=0.0, type_line="Basic Land — Plains"),
+            card(commander, type_line="Legendary Creature — Human"),
+        ] + extra_cards
+        text = ("// Commander\n1 %s\n\n// Deck\n%s36 Plains\n"
+                % (commander, extra_lines))
+        parsed, cards, tags = build(cards_list, text)
+        return features.analyze(parsed, cards, tags)
+
+    def test_vanilla_fatty_is_the_first_cut(self):
+        an = self._deck(
+            [card("Big Dumb Lizard", cost="{5}{G}", mv=6.0,
+                  type_line="Creature — Dinosaur"),
+             card("Useful Thing", cost="{1}{G}", mv=2.0, type_line="Sorcery",
+                  text="Draw two cards.")],
+            "1 Big Dumb Lizard\n1 Useful Thing\n")
+        result = classify.classify(an.vector)
+        cuts = advice.cut_candidates(an, result)
+        self.assertTrue(cuts)
+        self.assertEqual(cuts[0].name, "Big Dumb Lizard")
+        self.assertIn("nothing", cuts[0].reason)
+
+    def test_universally_useful_cards_are_never_cut_candidates(self):
+        # A ramp rock is off-theme for almost every archetype, and must still
+        # never be proposed as a cut.
+        an = self._deck(
+            [card("Sol Ring", cost="{1}", mv=1.0, type_line="Artifact",
+                  text="{T}: Add {C}{C}."),
+             card("Big Dumb Lizard", cost="{5}{G}", mv=6.0,
+                  type_line="Creature — Dinosaur")],
+            "1 Sol Ring\n1 Big Dumb Lizard\n")
+        result = classify.classify(an.vector)
+        names = [c.name for c in advice.cut_candidates(an, result)]
+        self.assertIn("Big Dumb Lizard", names)
+        self.assertNotIn("Sol Ring", names)
+
+    def test_the_commander_is_never_a_cut_candidate(self):
+        an = self._deck([card("Filler", type_line="Creature — Bear")],
+                        "1 Filler\n")
+        result = classify.classify(an.vector)
+        names = [c.name for c in advice.cut_candidates(an, result)]
+        self.assertNotIn("Big Mana Boss", names)
+
+    def test_a_finisher_counts_toward_a_plan_that_wants_a_top_end(self):
+        # "top_end_share" is not a role, so without shape credit the very card
+        # a Big Mana deck ramps into looks like it contributes nothing.
+        big_mana = archetypes.ARCHETYPES_BY_KEY["big_mana"]
+        an = self._deck(
+            [card("Huge Finisher", cost="{6}{G}{G}", mv=8.0,
+                  type_line="Creature — Avatar",
+                  text="Creatures you control get +2/+2 and gain trample.")],
+            "1 Huge Finisher\n")
+        result = classify.classify(an.vector)
+        wanted = advice.plan_roles(result, target_archetype=big_mana)
+        entry = next(e for e in an.entries if e.name == "Huge Finisher")
+        self.assertGreater(advice._shape_credit(entry, an, wanted), 0.0)
+
+    def test_swap_budget_counts_only_additions(self):
+        recs = [
+            advice.Recommendation(advice.MEDIUM, "direction", "Add", "", "", 4),
+            advice.Recommendation(advice.MEDIUM, "direction", "Trim", "", "", -3),
+            advice.Recommendation(advice.LOW, "focus", "Note", ""),
+        ]
+        self.assertEqual(advice.swap_budget(recs), 4)
 
 
 class TestEndToEnd(unittest.TestCase):

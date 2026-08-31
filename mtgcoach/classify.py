@@ -129,6 +129,31 @@ def classify(deck_vector: Dict[str, float],
     return Classification(matches)
 
 
+# A second archetype only joins the blend if it is a genuinely good match in
+# its own right.  Rank alone is not enough: every deck has a second-nearest
+# archetype, and for a focused deck that runner-up is usually junk.
+BLEND_MIN_AFFINITY = 0.15
+BLEND_MIN_FIT = 0.40
+
+
+def blend_matches(classification: Classification, top_n: int = 2,
+                  min_affinity: float = BLEND_MIN_AFFINITY,
+                  min_fit: float = BLEND_MIN_FIT) -> List[Match]:
+    """The archetypes worth steering toward - the best one, plus any close
+    runner-up that is a real match rather than merely second in line.
+
+    ``top_n`` is a maximum, not a quota.  A deck that is squarely one thing
+    gets a single archetype back, so its advice is not diluted by a 4%-affinity
+    runner-up it has nothing in common with.
+    """
+    matches = classification.matches
+    kept = [matches[0]]
+    for match in matches[1:top_n]:
+        if match.affinity >= min_affinity and match.fit >= min_fit:
+            kept.append(match)
+    return kept
+
+
 def blended_target(classification: Classification, top_n: int = 2) -> Dict[str, float]:
     """The feature vector the deck is being steered toward.
 
@@ -136,7 +161,9 @@ def blended_target(classification: Classification, top_n: int = 2) -> Dict[str, 
     rather than a single one, so a genuinely hybrid deck is not told to abandon
     half of itself.
     """
-    top = classification.top(top_n)
+    top = blend_matches(classification, top_n)
+    if len(top) == 1:
+        return dict(top[0].archetype.profile)
     # Soften the affinities (sqrt) before blending: a 70/10 split should not
     # produce a target that is 88% the winner, or hybrid decks get told to
     # abandon their second half.

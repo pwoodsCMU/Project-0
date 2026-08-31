@@ -53,7 +53,7 @@ Other commands:
 | `mtgcoach fit KEY DECK...` | build a new archetype profile by averaging decks |
 
 Useful flags: `--json out.json`, `--offline`, `--top N`, `--roles N`,
-`--blend N`, `--profiles FILE`, `--refresh-tags`, `--no-color`.
+`--blend N`, `--cuts N`, `--profiles FILE`, `--refresh-tags`, `--no-color`.
 
 ## Decklist format
 
@@ -190,18 +190,50 @@ value that subtracts that allowance. A deck led by a commander granting
 `evoke {4}` to everything is not playing the same curve as its raw average
 suggests.
 
-**Direction** compares the deck against a blend of its two nearest archetypes -
-or against `--target` if you name a goal. The largest weighted gaps become
-advice, converted into "roughly N cards worth" so it is actionable.
+**Direction** compares the deck against a blend of its nearest archetypes - or
+against `--target` if you name a goal. The largest weighted gaps become advice,
+converted into "roughly N cards worth" so it is actionable.
 
-Three guards keep this from producing nonsense on decks that are already good:
+The blend is gated on absolute quality, not rank. Every deck has a
+second-nearest archetype, and for a focused deck that runner-up is usually
+junk: a second archetype joins only if it holds at least 15% affinity *and*
+40% fit. A deck that is squarely one thing is measured against that one thing;
+a genuine hybrid keeps both halves.
 
-- gaps smaller than ~2 cards are ignored as noise;
-- "you have too much X" needs a much larger gap than "you need more X", and is
-  suppressed entirely for anything in the signature of one of the deck's own
-  top matches - over-investment is usually the deck's identity;
-- the blend uses softened (square-rooted) affinities, so a hybrid deck is not
-  told to abandon its second half.
+Guards that keep this from manufacturing work on decks that are already good:
+
+- the noise floor scales with how well the deck already matches - a deck
+  sitting 0.05 from its archetype is not told about 0.03 deviations;
+- "you have too much X" needs a larger gap than "you need more X", and is
+  suppressed entirely for the signature features of the deck's own top
+  matches, and for **anything the commander itself does** - over-investment is
+  usually the deck's identity;
+- ramp, draw, removal and protection are never trimmed.
+
+### What to cut
+
+A Commander deck is exactly 100 cards, so every "add four of these" is also
+"cut four of those". Advice that only ever adds is advice the player cannot
+act on. The report totals the slots its recommendations want - the **swap
+budget** - and then answers where they come from.
+
+Role-level trims cover part of it. The rest is a ranked list of the cards
+contributing least to the plan, scored on how much each one does, how much of
+that is on plan, and what it costs to do it. Two details make the difference
+between useful and absurd:
+
+- **Universally useful cards are never listed.** Ramp, draw, removal, tutors
+  and protection earn their slot in any deck. Without this rule a synergy
+  score cheerfully recommends cutting Sol Ring for being off-theme. Having
+  *too much* ramp is real, but that is a role-level trim.
+- **Shape credit.** A Big Mana deck declares a big top end, but
+  `top_end_share` is not a role any card can carry, so on role matching alone
+  the finisher the deck exists to cast looks like it contributes nothing.
+  Cards get credit for fitting the shape their plan asks for.
+
+This is the one place the tool names specific cards, and only ever cards the
+player already owns - "what should I cut" has no useful role-level answer. If
+nothing scores badly enough, it says so rather than padding the list.
 
 ## Limitations
 
@@ -211,7 +243,9 @@ Three guards keep this from producing nonsense on decks that are already good:
   backstop is regex, so individual cards are occasionally miscategorised. The
   report says how many cards had no tag data at all.
 - Role density is a count of cards, not a measure of quality or efficiency:
-  ten bad draw spells and ten good ones look identical here.
+  ten bad draw spells and ten good ones look identical here. The cut list
+  inherits this - it ranks how well a card connects to the plan, not how
+  strong the card is.
 - The tool sees a decklist, not a play pattern. It cannot see that two cards
   combo, that the mana base's untapped ratio is wrong, or that the deck is
   simply too strong or too weak for its table.
@@ -222,10 +256,11 @@ Three guards keep this from producing nonsense on decks that are already good:
 python3 -m unittest discover -s tests -v
 ```
 
-39 tests: parsing, role assignment, creature-type concentration, commander
+48 tests: parsing, role assignment, creature-type concentration, commander
 weighting and curve allowance, feature maths, legality checks, distance and
-mixture properties, advice guards, plus an end-to-end check that each sample
-deck classifies as intended (skipped if the Scryfall cache is empty).
+mixture properties, blend gating, cut-candidate scoring, advice guards, plus an
+end-to-end check that each sample deck classifies as intended (skipped if the
+Scryfall cache is empty).
 
 ## Layout
 
