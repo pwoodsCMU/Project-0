@@ -8,7 +8,7 @@ It does three things:
 1. **Descriptive statistics** - mana curve, land count against a curve-aware
    target, colour pips versus colour sources, type breakdown, and a
    role-by-role account of what the cards in the deck actually do.
-2. **Partial classification** - measures the distance from the deck to thirteen
+2. **Partial classification** - measures the distance from the deck to fourteen
    archetype reference profiles and reports the result as a *mixture*
    ("58% Aristocrats, 22% Go-Wide Aggro"), plus a focus score for how
    committed the deck is to any plan at all.
