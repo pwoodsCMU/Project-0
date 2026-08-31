@@ -17,6 +17,7 @@ about four pieces of spot removal" rather than "play Swords to Plowshares".
 
 from __future__ import annotations
 
+import math
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from . import synergy as synergy_mod
@@ -45,6 +46,15 @@ UNIVERSAL_FLOORS = {
 # cut the best board wipe ever printed. Staples can still be trimmed at the
 # role level; they are just never the card the tool points at.
 STAPLE_RANK = 600
+
+# Contribution score below which a card is worth putting on the table as a
+# possible cut. Calibrated so a tuned deck yields a short list and a precon
+# yields a long one.
+CUT_SCORE_CEILING = 2.0
+
+# A card carrying the deck's top theme stays core down to this rank; past it,
+# being on theme no longer excuses being a card almost nobody plays.
+THEME_CORE_RANK = 3500
 
 # What a commander caring about something implies about the deck's shape.
 # These are not roles a card carries, so without this an artifact commander's
@@ -708,6 +718,25 @@ def _tribe_credit(entry, analysis: DeckAnalysis, wanted: set) -> float:
     return 0.0
 
 
+# EDHREC rank at which a card is neither notably popular nor notably ignored.
+QUALITY_PIVOT = 1500.0
+
+
+def _quality_bonus(rank: Optional[int]) -> float:
+    """EDHREC rank as a quality proxy, on a log scale.
+
+    Comparing this tool's suggestions against community upgrade guides showed
+    that card quality drives real cut decisions at least as much as synergy
+    does: the cards people actually remove from precons sit at ranks of four
+    to twelve thousand while carrying the deck's theme perfectly well. Rank is
+    a popularity measure rather than a power measure, but it is the only
+    quality signal available, and it tracks those decisions closely.
+    """
+    if rank is None:
+        return -1.5          # too rarely played for EDHREC to track at all
+    return max(-2.5, min(2.0, -2.0 * math.log10(max(rank, 1) / QUALITY_PIVOT)))
+
+
 def _shape_credit(entry, analysis: DeckAnalysis, wanted: set,
                   ignore: Sequence[str] = ()) -> float:
     """Credit a card for fitting the *shape* its plan asks for.
@@ -786,64 +815,92 @@ def cut_candidates(analysis: DeckAnalysis, classification: Classification,
             # surrender three cards, not every card that fills it.
             oversupplied[key] = int(surplus)
 
-    dead: List[CutCandidate] = []
-    off_plan: List[CutCandidate] = []
-    redundant: List[CutCandidate] = []
+    # When the commander spells out what it works with, that is the deck's
+    # plan and it outranks tag-derived synergy - which, in a precon, measures
+    # whatever filler the deck happens to hold a lot of.
+    condition = analysis.commander_condition
+    trust_synergy = condition is None
 
+    # Standardise synergy within the deck. In a deck whose theme is broad -
+    # Food, say - most cards score 1.0 and synergy stops telling cards apart;
+    # what matters is being on theme *relative to the rest of this deck*.
+    spells = [e for e in analysis.entries if not e.is_land]
+    if spells:
+        mean_syn = sum(e.synergy for e in spells) / len(spells)
+    else:
+        mean_syn = 0.0
+
+    scored: List[tuple] = []
     for entry in analysis.entries:
         if entry.is_land or entry.is_commander:
             continue
         roles = entry.roles
-        on_plan = len(roles & wanted)
-        shape = _shape_credit(entry, analysis, wanted)
-        protected = bool((roles & UNIVERSAL_ROLES) - set(oversupplied))
+        enables = entry.satisfies(condition)
+        synergy_score = (entry.synergy - mean_syn) if trust_synergy else 0.0
         rank = entry.edhrec_rank
         staple = rank is not None and rank <= STAPLE_RANK
-        # The role vocabulary cannot see every theme. A card carrying the
-        # deck's own discovered themes is doing something for the deck even
-        # when it fills no named role at all.
-        synergistic = entry.synergy >= synergy_mod.SYNERGY_THRESHOLD
-
-        if (not roles and not synergistic
-                and _tribe_credit(entry, analysis, wanted) == 0):
-            dead.append(CutCandidate(
-                entry.name, entry.quantity, entry.mana_value,
-                "does nothing the rest of the deck can build on",
-                sorted(roles), "dead", rank))
-        elif protected or staple or entry.synergy >= 0.5:
-            continue          # earns its slot, is a staple, or is core to the plan
-        elif roles and roles <= set(oversupplied):
-            redundant.append(CutCandidate(
-                entry.name, entry.quantity, entry.mana_value,
-                "you already have more %s than the plan needs, and this is one "
-                "of the more expensive ones"
-                % _join(sorted(ROLES_BY_KEY[r].label.lower()
-                               for r in roles if r in ROLES_BY_KEY)),
-                sorted(roles), "redundant", rank))
-        elif on_plan == 0 and shape == 0 and not synergistic:
-            off_plan.append(CutCandidate(
-                entry.name, entry.quantity, entry.mana_value,
-                "nothing it does serves your %s plan" % plan_name,
-                sorted(roles), "off_plan", rank))
-
-    # Most expensive first within every tier - the priciest copy of an effect
-    # you have too many of is the one to lose. Rank breaks ties so the
-    # less-played of two equally costly cards goes first.
-    for group in (dead, off_plan, redundant):
-        group.sort(key=lambda c: (-c.mana_value, -(c.rank or 100000)))
-
-    # Never propose more cards from an over-supplied role than the surplus.
-    quota = dict(oversupplied)
-    trimmed: List[CutCandidate] = []
-    for candidate in redundant:
-        keys = [r for r in candidate.roles if r in quota and quota[r] > 0]
-        if not keys and candidate.roles:
+        protected = bool((roles & UNIVERSAL_ROLES) - set(oversupplied))
+        # A card carrying the deck's strongest theme is core - unless it is
+        # also one of the least played cards in the format, which is exactly
+        # the profile of the filler community upgrade guides cut first.
+        core = enables or (trust_synergy and entry.synergy >= 0.85
+                           and (rank is None or rank <= THEME_CORE_RANK))
+        if core or staple or protected:
             continue
-        for key in keys:
-            quota[key] -= 1
-        trimmed.append(candidate)
 
-    return (dead + off_plan + trimmed)[:limit]
+        on_plan = len(roles & wanted)
+        shape = _shape_credit(entry, analysis, wanted)
+        redundant_roles = roles & set(oversupplied)
+
+        # How much this card contributes, graded rather than gated. A binary
+        # "has at least one wanted role" test passes almost every creature -
+        # combat_aggro alone is enough - which left the cut list nearly empty.
+        score = (1.0 * on_plan + shape + 2.0 * synergy_score
+                 - 0.8 * len(redundant_roles)
+                 + _quality_bonus(rank))
+
+        if (not roles and entry.synergy < synergy_mod.SYNERGY_THRESHOLD
+                and _tribe_credit(entry, analysis, wanted) == 0):
+            tier, reason = "dead", "does nothing the rest of the deck can build on"
+        elif roles and roles <= set(oversupplied):
+            tier = "redundant"
+            reason = ("you already have more %s than the plan needs"
+                      % _join(sorted(ROLES_BY_KEY[r].label.lower()
+                                     for r in roles if r in ROLES_BY_KEY)))
+        elif condition and not enables:
+            tier = "off_plan"
+            reason = ("your commander cannot use it - it only works with %s of "
+                      "mana value %d or more"
+                      % (_join(["%ss" % t for t in condition["types"]]),
+                         int(condition["min_mv"])))
+        else:
+            tier = "off_plan"
+            reason = "contributes least to your %s plan" % plan_name
+        if rank is not None and rank > 3000 and tier != "dead":
+            reason += "; it is also among the least played cards here"
+
+        scored.append((score, CutCandidate(entry.name, entry.quantity,
+                                           entry.mana_value, reason,
+                                           sorted(roles), tier, rank)))
+
+    # Weakest contribution first; EDHREC rank breaks ties, since among equally
+    # marginal cards the one nobody else plays is the easier cut.
+    scored.sort(key=lambda pair: (pair[0], -(pair[1].rank or 100000)))
+    # Above this, a card is pulling its weight; listing it would be noise.
+    candidates = [c for score, c in scored if score < CUT_SCORE_CEILING]
+
+    # A role never gives up more cards than the amount it is actually over by.
+    quota = dict(oversupplied)
+    out: List[CutCandidate] = []
+    for candidate in candidates:
+        keys = [r for r in candidate.roles if r in quota]
+        if candidate.tier == "redundant":
+            if not any(quota.get(k, 0) > 0 for k in keys):
+                continue
+            for key in keys:
+                quota[key] -= 1
+        out.append(candidate)
+    return out[:limit]
 
 
 def swap_budget(recommendations: Sequence[Recommendation]) -> int:
@@ -860,6 +917,21 @@ def all_recommendations(analysis: DeckAnalysis,
             + fundamentals(analysis, classification)
             + direction(analysis, classification, blend_top,
                         target_archetype=target_archetype))
+
+    # A deck can be structurally sound and still be mostly weak cards, which is
+    # the usual state of a preconstructed deck. The fundamentals and direction
+    # passes both read such a deck as fine, so say it directly.
+    weak = cut_candidates(analysis, classification, blend_top,
+                          target_archetype, limit=99)
+    if len(weak) >= 12:
+        recs.append(Recommendation(
+            MEDIUM, "quality",
+            "About %d cards here are doing very little for this deck" % len(weak),
+            "They are not badly chosen so much as filler - individually "
+            "replaceable cards that neither serve the plan nor stand on their "
+            "own. Precons in particular improve more from swapping these than "
+            "from any single upgrade. They are listed below, weakest first."
+            % (), "%d low-contribution cards" % len(weak)))
     # The fundamentals pass and the direction pass can reach the same
     # conclusion by different routes; keep the first (higher priority) one.
     seen = set()

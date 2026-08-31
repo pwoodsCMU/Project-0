@@ -31,6 +31,15 @@ CHANGELING_RE = re.compile(r"(changeling|is every creature type)", re.IGNORECASE
 # makes a deck of mana sinks look like it has a superb early game.  Count them
 # at a realistic X instead.
 X_COST_RE = re.compile(r"\{X\}")
+
+# Commanders that only work with a certain kind of card state so in their
+# rules text.  Bello animates "artifacts and enchantments ... with mana value 4
+# or greater", which is the deck's actual plan and is not a Scryfall tag, so
+# theme discovery cannot find it - but the commander says it outright.
+COMMANDER_CONDITION_RE = re.compile(
+    r"(?P<types>(?:artifact|enchantment|permanent|creature|planeswalker)[^.]{0,80}?)"
+    r"mana value (?P<mv>\d+) or (?:greater|more)", re.IGNORECASE)
+CONDITION_TYPES = ("artifact", "enchantment", "creature", "planeswalker")
 X_SPELL_ALLOWANCE = 2.0
 
 # The commander is castable in every single game, so it carries more weight in
@@ -146,6 +155,17 @@ class CardEntry(object):
     def edhrec_rank(self):
         return self.card.get("edhrec_rank")
 
+    def satisfies(self, condition: Optional[dict]) -> bool:
+        """Whether this card is one the commander's ability can actually use."""
+        if not condition:
+            return False
+        if self.mana_value < condition["min_mv"]:
+            return False
+        front = self.type_line.split(" // ")[0].lower()
+        if "creature" not in condition["types"] and "creature" in front:
+            return False
+        return any(t in front for t in condition["types"])
+
     @property
     def type_line(self) -> str:
         return self.card.get("type_line", "")
@@ -186,6 +206,7 @@ class DeckAnalysis(object):
         self.commander_notes: List[str] = []
         self.commander_curve_allowance = 0.0
         self.commander_wants_high_curve = False
+        self.commander_condition: Optional[dict] = None
         self.themes: List = []
 
     def effective_avg_mv(self) -> float:
@@ -398,6 +419,13 @@ def _commander_effects(an: DeckAnalysis) -> None:
     for cmdr in an.commanders:
         # A commander that pays you for expensive permanents means the high
         # curve is the plan, not a mistake.
+        match = COMMANDER_CONDITION_RE.search(cmdr.card.get("oracle_text") or "")
+        if match and an.commander_condition is None:
+            types = tuple(t for t in CONDITION_TYPES
+                          if t in match.group("types").lower())
+            if types:
+                an.commander_condition = {"types": types,
+                                          "min_mv": float(match.group("mv"))}
         if ("high mana value matters" in cmdr.tags
                 or re.search(r"mana value \d+ or (greater|more)",
                              cmdr.card.get("oracle_text") or "", re.IGNORECASE)):

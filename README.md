@@ -47,7 +47,7 @@ Other commands:
 | Command | What it does |
 | --- | --- |
 | `mtgcoach analyze DECK` | the full report (default; `mtgcoach DECK` also works) |
-| `mtgcoach archetypes` | the thirteen reference profiles and their game plans |
+| `mtgcoach archetypes` | the fourteen reference profiles and their game plans |
 | `mtgcoach roles` | the functional role vocabulary |
 | `mtgcoach card NAME...` | the Scryfall tags and roles of individual cards |
 | `mtgcoach fit KEY DECK...` | build a new archetype profile by averaging decks |
@@ -213,9 +213,17 @@ archetypes rather than a single label. Two derived numbers matter:
 
 ### Archetype profiles
 
-Thirteen hand-authored profiles: Go-Wide Aggro, Voltron, Midrange Value,
+Fourteen hand-authored profiles: Go-Wide Aggro, Voltron, Midrange Value,
 Control, Combo, Stax/Prison, Big Mana, Lands Matter, Aristocrats, Reanimator,
-Spellslinger, +1/+1 Counters and Typal.
+Spellslinger, +1/+1 Counters, Typal and Group Hug.
+
+Discovered themes also act as archetype evidence. Each profile lists
+`signature_tags` - Scryfall tags that, when they appear among a deck's own
+themes, shorten its distance to that archetype by up to a quarter. It is
+evidence rather than override: a theme moves an archetype up the ranking, it
+does not win from any distance. This lifted fit on every sample deck (Dance of
+the Elementals 52% to 64%, World Shaper 49% to 62%) and moved Prismari
+Artistry off the Midrange Value residual category onto Spellslinger.
 
 They are **expert priors, not fitted parameters**. Each one states only the
 features it takes a position on; everything else falls back to `BASELINE`, a
@@ -327,6 +335,38 @@ This is the one place the tool names specific cards, and only ever cards the
 player already owns - "what should I cut" has no useful role-level answer. The
 list never runs longer than the number of slots the advice actually needs.
 
+### Validation against community upgrade guides
+
+EDHREC publishes, per preconstructed deck, the share of players who cut each
+card. That is real ground truth for the cut list, so the suggestions were
+measured against it.
+
+The first run scored **0 of 10** on the Animated Army precon. Diagnosing that
+one number produced most of the changes above:
+
+| Cause | Evidence | Fix |
+| --- | --- | --- |
+| The plan was invisible to every signal | Bello animates noncreature permanents of mana value 4+, which is not a Scryfall tag, so theme discovery could not find it | Parse the commander's stated condition and treat cards satisfying it as core |
+| Themes found the filler, not the plan | Animated Army's top three themes were `ramp`, `mana producer`, `mana rock`; its 19 actual enablers scored *below* deck-average synergy | Exclude mana and other ubiquitous functions from theme discovery |
+| "On plan" was a yes/no test | `combat_aggro` alone made almost every creature on-plan, so the off-plan tier was nearly empty and only 3 cuts were ever produced | Rank by a graded contribution score instead of gating on tiers |
+| Card quality was barely weighted | The cards communities actually cut sit at ranks of 4,000-12,000 while carrying the theme perfectly well | Make EDHREC rank a log-scaled term rather than a small nudge |
+| Synergy stopped discriminating | In Food and Fellowship nearly every card scores 1.00, because Food is the theme | Standardise synergy within the deck |
+
+Overlap with the community's most-cut lists after those changes:
+
+| Precon | Before | After |
+| --- | --- | --- |
+| Animated Army | 0 / 10 | 6 / 10 |
+| Food and Fellowship | 1 / 8 | 3 / 8 |
+
+The misses are informative rather than embarrassing. Burnished Hart and Etali,
+Primal Storm are cut by most upgraders but are genuinely strong cards, held
+back by staple protection - the same rule that stops the tool proposing Sol
+Ring. Spine of Ish Sah satisfies Bello's condition, so the tool defends it.
+And several Food and Fellowship cuts are cards that carry the theme and are
+simply weak, which is a card-quality judgement the tool can only approximate
+through popularity.
+
 ## Limitations
 
 - Archetype profiles are priors from one author's judgement. They are anchored
@@ -338,6 +378,11 @@ list never runs longer than the number of slots the advice actually needs.
   ten bad draw spells and ten good ones look identical here. The cut list
   softens this with EDHREC rank, but rank measures popularity, not power, and
   a card can be both unpopular and exactly right for your deck.
+- Card quality is approximated by EDHREC rank, which measures how widely a
+  card is played rather than how good it is in your deck. It tracks community
+  cut decisions closely, but it will always undervalue a niche card that is
+  right for your build, and it cannot see that two cards are redundant with
+  each other specifically.
 - Theme discovery finds *correlation in tags*, not the actual combo. It can
   tell that a deck is built on {X} spells; it cannot tell that two particular
   cards win on the spot together.
@@ -351,11 +396,11 @@ list never runs longer than the number of slots the advice actually needs.
 python3 -m unittest discover -s tests -v
 ```
 
-76 tests: parsing, split-card identifiers, partner pairing and inference, role
+81 tests: parsing, split-card identifiers, partner pairing and inference, role
 assignment, creature-type concentration, theme discovery by tag lift, {X}
 spell costing, commander weighting, curve allowance, high-curve commanders and
 commander-driven plan shape, feature maths, legality checks, distance and
-mixture properties, blend gating, cut-candidate tiers, staple protection,
+mixture properties, blend gating, cut-candidate scoring, staple protection, rank-based quality,
 advice guards, plus an end-to-end check that each sample deck classifies as
 intended (skipped if the Scryfall cache is empty).
 
@@ -368,7 +413,7 @@ mtgcoach/
   roles.py       the functional role vocabulary and its matching rules
   features.py    descriptive statistics, feature vector, legality checks
   synergy.py     deck-relative theme discovery by tag lift
-  archetypes.py  the thirteen reference profiles
+  archetypes.py  the fourteen reference profiles
   classify.py    distance, softmax mixture, focus, blended target
   advice.py      fundamentals and direction recommendation passes
   report.py      terminal and JSON rendering

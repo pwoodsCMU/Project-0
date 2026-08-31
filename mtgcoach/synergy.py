@@ -28,10 +28,27 @@ from __future__ import annotations
 import math
 from typing import Dict, List, Optional, Sequence, Set
 
+# Functions every Commander deck carries. A precon stuffed with mana rocks
+# looks, to a pure concentration measure, like a deck "about" ramp - which is
+# how the Animated Army precon ended up with ramp, mana producer and mana rock
+# as its top three themes while the expensive artifacts its commander animates
+# scored below average. Mana and fixing are table stakes, not a plan.
+GENERIC_TAGS = frozenset([
+    "ramp", "mana producer", "mana rock", "mana dork", "mana increaser",
+    "adds multiple mana", "mana filter", "rainbow land", "refund",
+    "land ramp", "multi land ramp", "utility mana rock", "ritual",
+    "buff mana", "mana abilities matter", "non mana ability mana",
+    "activated ability", "triggered ability", "passive ability",
+    "cast trigger", "cast trigger-you", "attack trigger", "death trigger",
+    "intervening if clause", "delayed trigger", "multiple targets",
+    "single target instant/sorcery", "modal", "drawback", "cheaper than mv",
+    "more expensive than mv", "mana sink", "cost reducer",
+])
+
 # A theme has to show up in at least this many cards to be a theme rather than
 # a coincidence, and be this much more concentrated here than in Magic at large.
 MIN_THEME_CARDS = 3
-MIN_THEME_LIFT = 2.0
+MIN_THEME_LIFT = 2.5
 MAX_THEMES = 12
 
 # Below this share of the deck's strongest theme, a card is not carrying the
@@ -84,7 +101,7 @@ def deck_themes(analysis, tag_index: Dict[str, List[str]],
 
     themes: List[Theme] = []
     for label, count in counts.items():
-        if count < MIN_THEME_CARDS or label in cosmetic:
+        if count < MIN_THEME_CARDS or label in cosmetic or label in GENERIC_TAGS:
             continue
         global_share = frequencies.get(label, 0) / universe
         if global_share <= 0:

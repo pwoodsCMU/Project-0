@@ -65,11 +65,13 @@ def cmd_analyze(args) -> int:
     recommendations = advice.all_recommendations(analysis, classification,
                                                  blend_top=args.blend,
                                                  target_archetype=target)
-    # Never propose more cuts than the advice actually needs room for.
+    # Never propose more cuts than the advice needs room for - unless the deck
+    # is mostly filler, in which case the list is the point.
     needed = advice.swap_budget(recommendations)
+    filler = any(r.kind == "quality" for r in recommendations)
+    limit = args.cuts if filler else min(args.cuts, max(needed, 3))
     cuts = advice.cut_candidates(analysis, classification, blend_top=args.blend,
-                                 target_archetype=target,
-                                 limit=min(args.cuts, max(needed, 3)))
+                                 target_archetype=target, limit=limit)
 
     if args.json:
         payload = report.to_json(analysis, classification, recommendations,

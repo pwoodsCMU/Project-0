@@ -595,29 +595,36 @@ class TestCutCandidates(unittest.TestCase):
         parsed, cards, tags = build(cards_list, text)
         return features.analyze(parsed, cards, tags)
 
-    def test_an_on_plan_payoff_is_never_a_cut(self):
-        # Kindred Summons is expensive and does one thing, but that one thing
-        # is the typal deck's game-ender.
-        cards_list = [card("Elemental %d" % i,
-                           type_line="Creature — Elemental") for i in range(20)]
-        cards_list += [
+    def test_a_well_ranked_on_plan_card_outscores_unplayed_filler(self):
+        # The guarantee is no longer a hard gate but a ranking: a card that is
+        # on plan and widely played must rank above one that is neither.
+        payoff = card("Tribal Payoff", cost="{5}{G}{G}", mv=7.0,
+                      type_line="Instant")
+        payoff["edhrec_rank"] = 2600
+        filler = card("Nobody Plays This", cost="{5}{G}", mv=6.0,
+                      type_line="Creature — Bear")
+        filler["edhrec_rank"] = 12000
+        cards_list = [
             card("Plains", cost="", mv=0.0, type_line="Basic Land — Plains"),
             card("Tribe Boss", type_line="Legendary Creature — Elemental"),
-            card("Kindred Summons", cost="{5}{G}{G}", mv=7.0,
-                 type_line="Instant"),
+            payoff, filler,
         ]
-        text = ("// Commander\n1 Tribe Boss\n\n// Deck\n1 Kindred Summons\n"
-                + "\n".join("1 Elemental %d" % i for i in range(20))
-                + "\n36 Plains\n")
-        parsed, cards, tags = build(cards_list, text)
-        tags = {"oid-kindred-summons": ["typal", "typal-creature"]}
+        text = ("// Commander\n1 Tribe Boss\n\n// Deck\n1 Tribal Payoff\n"
+                "1 Nobody Plays This\n36 Plains\n")
+        tags = {"oid-tribal-payoff": ["typal", "typal-creature"]}
         parsed, cards, _ = build(cards_list, text)
         an = features.analyze(parsed, cards, tags)
-        entry = next(e for e in an.entries if e.name == "Kindred Summons")
-        self.assertIn("typal", entry.roles)
-        result = classify.classify(an.vector)
-        names = [c.name for c in advice.cut_candidates(an, result, limit=99)]
-        self.assertNotIn("Kindred Summons", names)
+        result = classify.classify(an.vector, themes=an.themes)
+        cuts = [c.name for c in advice.cut_candidates(an, result, limit=99)]
+        self.assertIn("Nobody Plays This", cuts)
+        if "Tribal Payoff" in cuts:
+            self.assertGreater(cuts.index("Tribal Payoff"),
+                               cuts.index("Nobody Plays This"))
+
+    def test_rank_drives_the_quality_term(self):
+        self.assertGreater(advice._quality_bonus(200), advice._quality_bonus(2000))
+        self.assertGreater(advice._quality_bonus(2000), advice._quality_bonus(12000))
+        self.assertLess(advice._quality_bonus(None), 0.0)
 
     def test_oversupplied_universal_cards_are_redundant_not_off_plan(self):
         an = self._deck([], "")
@@ -1034,6 +1041,7 @@ class TestEndToEnd(unittest.TestCase):
         "thrasios_tymna_partners.txt": "control",
         "peace_offering.txt": "group_hug",
         "prismari_artistry.txt": "spellslinger",
+        "quandrix_unlimited.txt": "counters",
     }
 
     def test_sample_decks_classify_as_intended(self):
@@ -1055,6 +1063,11 @@ class TestEndToEnd(unittest.TestCase):
             self.assertTrue(an.commanders, "%s has no commander" % filename)
             self.assertEqual(an.legality, [], "%s is not legal" % filename)
             result = classify.classify(an.vector, themes=an.themes)
+            if filename == "quandrix_unlimited.txt":
+                # A payoff the role vocabulary cannot see must survive.
+                cuts = [c.name for c in
+                        advice.cut_candidates(an, result, limit=99)]
+                self.assertNotIn("Unbound Flourishing", cuts)
             self.assertEqual(result.best.archetype.key, expected,
                              "%s classified as %s" % (filename,
                                                       result.best.archetype.key))
