@@ -21,8 +21,34 @@ CURVE_BUCKETS = ["0", "1", "2", "3", "4", "5", "6", "7+"]
 
 PIP_RE = re.compile(r"\{([^}]+)\}")
 
+# A creature that counts as every type (Changeling, "is every creature type")
+# belongs to whatever tribe the deck is playing.
+CHANGELING_RE = re.compile(r"(changeling|is every creature type)", re.IGNORECASE)
+
+# The commander is castable in every single game, so it carries more weight in
+# the deck's identity than any one of the other 99 cards.  Role densities in
+# the feature vector count it this many times; the descriptive counts stay
+# honest at one card.
+COMMANDER_WEIGHT = 3
+
+# Commander abilities that change what a "fair" curve looks like.  A commander
+# that caps or discounts casting costs, or puts things into play directly,
+# lets the deck run cards it could never hard-cast on time.
+COMMANDER_COST_PATTERNS = [
+    (r"cost(?:s)? \{?\d+\}? less", "makes your spells cheaper"),
+    (r"gains? (?:evoke|affinity|convoke|improvise|delve|emerge)",
+     "gives your spells an alternative cost"),
+    (r"without paying (?:its|their) mana cost",
+     "casts spells without paying for them"),
+    (r"you may cast .{0,60}(?:from your graveyard|from exile|from the top)",
+     "casts cards from outside your hand"),
+    (r"put(?:s)? .{0,60}onto the battlefield",
+     "puts permanents onto the battlefield directly"),
+]
+
 # Shape features that sit alongside the role densities in the feature vector.
 SHAPE_FEATURES = [
+    "typal_concentration",
     "creature_share",
     "instant_sorcery_share",
     "noncreature_permanent_share",
@@ -57,6 +83,8 @@ FEATURE_WEIGHTS: Dict[str, float] = {
     "lifegain": 0.5,
     "group_slug": 0.7,
     "typal": 0.7,
+    "counters_matter": 1.2,
+    "typal_concentration": 1.3,
     "creature_share": 1.2,
     "instant_sorcery_share": 1.0,
     "noncreature_permanent_share": 0.6,
@@ -122,6 +150,16 @@ class DeckAnalysis(object):
         self.legality: List[str] = []
         self.mdfc_land_backs = 0
         self.untagged = 0
+        self.creature_count = 0
+        self.dominant_type = ""
+        self.dominant_type_count = 0
+        self.subtype_counts: Dict[str, int] = {}
+        self.commander_notes: List[str] = []
+        self.commander_curve_allowance = 0.0
+
+    def effective_avg_mv(self) -> float:
+        """Average mana value, discounted for what the commander makes cheaper."""
+        return max(1.0, self.avg_mv - self.commander_curve_allowance)
 
     # -- convenience ------------------------------------------------------- #
     def role_share(self, key: str) -> float:
@@ -132,6 +170,17 @@ class DeckAnalysis(object):
     def mana_sources(self) -> int:
         """Lands plus ramp - the practical count for "can I cast my stuff"."""
         return self.land_count + self.role_counts.get("ramp", 0)
+
+
+def creature_subtypes(type_line: str) -> List[str]:
+    """Subtypes of the front face, e.g. 'Legendary Creature - Elemental Shaman'."""
+    front = type_line.split(" // ")[0]
+    if "creature" not in front.lower():
+        return []
+    for dash in ("\u2014", "-"):
+        if dash in front:
+            return front.split(dash, 1)[1].split()
+    return []
 
 
 def _type_bucket(type_line: str) -> str:
@@ -217,17 +266,109 @@ def analyze(parsed_deck, cards: Dict[str, dict], tag_index: Dict[str, List[str]]
         cmdr_identity.update(entry.card.get("color_identity") or [])
     an.commander_identity = [c for c in COLORS if c in cmdr_identity]
 
+    _dominant_creature_type(an)
+    _commander_effects(an)
     an.vector = build_vector(an)
     an.legality = check_legality(an, parsed_deck)
     return an
 
 
+def _commander_effects(an: DeckAnalysis) -> None:
+    """Read the commander's text for things that change how the deck is judged.
+
+    The commander is castable every game, so an ability that discounts or
+    cheats on casting costs applies to the whole deck - which means the curve
+    it can support is genuinely higher than the raw average suggests.
+    """
+    allowance = 0.0
+    for cmdr in an.commanders:
+        text = cmdr.card.get("oracle_text") or ""
+        for pattern, description in COMMANDER_COST_PATTERNS:
+            if re.search(pattern, text, re.IGNORECASE):
+                an.commander_notes.append(description)
+                allowance = max(allowance, 0.6)
+        if "ramp" in cmdr.roles:
+            an.commander_notes.append("accelerates your mana")
+            allowance = max(allowance, 0.4)
+    # De-duplicate while keeping order.
+    seen = set()
+    notes = []
+    for note in an.commander_notes:
+        if note not in seen:
+            seen.add(note)
+            notes.append(note)
+    an.commander_notes = notes
+    an.commander_curve_allowance = min(0.8, allowance)
+
+
+def _dominant_creature_type(an: DeckAnalysis) -> None:
+    """Find the tribe the deck is actually playing, and how concentrated it is.
+
+    Changelings count toward whatever the tribe turns out to be.  When the
+    commander is itself a creature, its own types get first refusal on ties -
+    an Elemental commander means the deck is asking to be measured on
+    Elementals, even if some other type happens to be one card ahead.
+    """
+    counts: Dict[str, int] = {}
+    creatures = 0
+    changelings = 0
+    for entry in an.entries:
+        subtypes = creature_subtypes(entry.type_line)
+        if not subtypes:
+            continue
+        creatures += entry.quantity
+        if CHANGELING_RE.search(entry.card.get("oracle_text") or ""):
+            changelings += entry.quantity
+            continue
+        for subtype in subtypes:
+            counts[subtype] = counts.get(subtype, 0) + entry.quantity
+
+    an.creature_count = creatures
+    an.subtype_counts = counts
+    if not creatures or not counts:
+        return
+
+    best = max(counts.values())
+    commander_types = set()
+    for cmdr in an.commanders:
+        commander_types.update(creature_subtypes(cmdr.type_line))
+        # Scryfall tags a typal payoff with the tribe it cares about, which
+        # catches commanders that are not themselves of the type they pump.
+        for tag in cmdr.tags:
+            if tag.startswith("typal-") and tag not in (
+                    "typal-creature", "typal-choose", "typal-share"):
+                commander_types.add(tag[len("typal-"):].title())
+
+    dominant = max(counts, key=lambda t: counts[t])
+    for subtype in commander_types:
+        if counts.get(subtype, 0) >= best * 0.8:
+            dominant = subtype
+            break
+
+    an.dominant_type = dominant
+    an.dominant_type_count = counts[dominant] + changelings
+
+
 def build_vector(an: DeckAnalysis) -> Dict[str, float]:
     nonland = float(an.nonland_count) or 1.0
     total = float(an.total) or 1.0
+
+    # Role densities weight the commander up: it is available in every game,
+    # so it says more about the deck than an average single copy does.
+    extra = COMMANDER_WEIGHT - 1
+    commander_spells = sum(e.quantity for e in an.commanders if not e.is_land)
+    role_denominator = nonland + extra * commander_spells
+
     vec: Dict[str, float] = {}
     for key in AXIS_ROLES:
-        vec[key] = an.role_counts.get(key, 0) / nonland
+        count = an.role_counts.get(key, 0)
+        count += extra * sum(e.quantity for e in an.commanders
+                             if key in e.roles and not e.is_land)
+        vec[key] = count / role_denominator
+
+    vec["typal_concentration"] = (
+        an.dominant_type_count / float(an.creature_count)
+        if an.creature_count else 0.0)
 
     vec["creature_share"] = an.type_counts.get("Creature", 0) / nonland
     vec["instant_sorcery_share"] = (

@@ -43,6 +43,8 @@ BASELINE: Dict[str, float] = {
     "lifegain": 0.09,
     "group_slug": 0.05,
     "typal": 0.03,
+    "counters_matter": 0.10,
+    "typal_concentration": 0.45,
     "creature_share": 0.34,
     "instant_sorcery_share": 0.32,
     "noncreature_permanent_share": 0.30,
@@ -253,10 +255,27 @@ ARCHETYPES: List[Archetype] = [
                   "before you untap, you are just playing a pile of cantrips."),
 
     Archetype(
+        "counters", "+1/+1 Counters",
+        "Creatures that grow: counter placement, proliferate, and payoffs that "
+        "scale with the counters already on board.",
+        "Put counters on everything, compound them faster than opponents can "
+        "answer, and attack with a board that outgrew their removal.",
+        {"counters_matter": 0.50, "creature_share": 0.48, "combat_aggro": 0.40,
+         "tokens": 0.15, "card_draw": 0.22, "protection": 0.15, "ramp": 0.17,
+         "removal_spot": 0.12, "removal_mass": 0.04, "low_curve_share": 0.50,
+         "avg_mv_norm": 0.42, "noncreature_permanent_share": 0.26,
+         "instant_sorcery_share": 0.22, "typal_concentration": 0.40},
+        signature=["counters_matter", "creature_share"],
+        watch_out="Counters are card advantage stored on a creature, which "
+                  "makes each creature a bigger loss. Carry protection, and "
+                  "make sure something makes the board wide as well as tall."),
+
+    Archetype(
         "typal", "Typal / Tribal",
         "One creature type, plus the lords and payoffs that reward playing it.",
         "Build a critical mass of one type, drop a lord, and attack.",
-        {"typal": 0.35, "creature_share": 0.50, "combat_aggro": 0.40,
+        {"typal_concentration": 0.85,
+         "typal": 0.30, "creature_share": 0.50, "combat_aggro": 0.40,
          "tokens": 0.15, "card_draw": 0.18, "removal_spot": 0.12,
          "tutor": 0.06, "ramp": 0.17, "low_curve_share": 0.45,
          "avg_mv_norm": 0.44, "instant_sorcery_share": 0.20,

@@ -113,6 +113,12 @@ FEATURE_ADVICE: Dict[str, Tuple[str, str]] = {
     "group_slug": (
         "Add non-combat damage",
         "Trim group-slug effects"),
+    "counters_matter": (
+        "Add more +1/+1 counter synergy",
+        "Trim counter payoffs"),
+    "typal_concentration": (
+        "Commit harder to one creature type",
+        "Your creatures do not need to share a type"),
     "typal": (
         "Add more payoffs for your creature type",
         "Trim typal cards that are only playable for their type"),
@@ -177,6 +183,11 @@ FEATURE_WHY: Dict[str, str] = {
                   "cannot.",
     "typal": "Lords and type payoffs are what make a tribal deck stronger than "
              "the same 30 creatures in a pile.",
+    "counters_matter": "Counters compound: each one makes every payoff that "
+                       "counts them better, so the pieces are worth far more "
+                       "together than apart.",
+    "typal_concentration": "Lords and type payoffs only pay off if most of "
+                           "your creatures actually share the type.",
     "creature_share": "Creatures are the cheapest way to pressure three "
                       "opponents at once.",
     "instant_sorcery_share": "Instants and sorceries let you interact on other "
@@ -222,7 +233,7 @@ def recommended_lands(analysis: DeckAnalysis,
     down a little for decks with a lot of cheap ramp, and goes *up* for decks
     whose whole plan is putting lands onto the battlefield.
     """
-    target = 36.0 + 2.4 * (analysis.avg_mv - 3.0)
+    target = 36.0 + 2.4 * (analysis.effective_avg_mv() - 3.0)
 
     lands_matter = analysis.role_share("lands_matter")
     if lands_matter >= 0.20:
@@ -258,10 +269,10 @@ def fundamentals(analysis: DeckAnalysis,
     if delta >= 3:
         out.append(Recommendation(
             HIGH, "mana", "Run about %d more lands" % delta,
-            "You have %d lands with an average mana value of %.2f. For that "
+            "You have %d lands with an effective average mana value of %.2f. For that "
             "curve, %d lands is the usual floor. Missing land drops is the "
             "most common reason a deck feels like it does nothing."
-            % (analysis.land_count, analysis.avg_mv, target),
+            % (analysis.land_count, analysis.effective_avg_mv(), target),
             "lands %d vs target %d" % (analysis.land_count, target)))
     elif delta <= -4:
         trim = min(4, -delta)
@@ -329,16 +340,21 @@ def fundamentals(analysis: DeckAnalysis,
             "%d board wipes" % mass))
 
     # --- curve ------------------------------------------------------------ #
-    if analysis.avg_mv > 3.6:
+    effective_mv = analysis.effective_avg_mv()
+    if effective_mv > 3.6:
         heavy = analysis.curve.get("6", 0) + analysis.curve.get("7+", 0)
+        caveat = ""
+        if analysis.commander_curve_allowance:
+            caveat = (" This already allows for your commander, which %s."
+                      % " and ".join(analysis.commander_notes))
         out.append(Recommendation(
-            HIGH if analysis.avg_mv > 4.0 else MEDIUM, "fundamentals",
+            HIGH if effective_mv > 4.0 else MEDIUM, "fundamentals",
             "Lower your curve",
             "Average mana value is %.2f with %d cards at 6+. Trading a few of "
             "the expensive cards for cheaper effects that do most of the same "
-            "job makes the deck far more consistent."
-            % (analysis.avg_mv, heavy),
-            "avg MV %.2f" % analysis.avg_mv))
+            "job makes the deck far more consistent.%s"
+            % (analysis.avg_mv, heavy, caveat),
+            "avg MV %.2f (effective %.2f)" % (analysis.avg_mv, effective_mv)))
 
     cheap = sum(analysis.curve.get(b, 0) for b in ("0", "1", "2"))
     if cheap / float(nonland) < 0.25:
@@ -480,7 +496,7 @@ def focus_note(analysis: DeckAnalysis, classification: Classification,
             % best.archetype.name,
             "best fit %.0f%%" % (100 * best.fit)))
     elif (target_archetype is None and classification.focus < 0.40
-          and second is not None):
+          and second is not None and second.affinity >= 0.20):
         out.append(Recommendation(
             MEDIUM, "focus", "Your deck is split between two plans",
             "It reads as %s (%.0f%%) and %s (%.0f%%) at once. That is fine if "

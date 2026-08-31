@@ -199,9 +199,19 @@ ROLES: List[Role] = [
               r"each opponent sacrifices)",
          axis=True),
 
-    Role("typal", "Typal / tribal synergy",
-         "Creature-type payoffs and lords.",
-         tags=["typal", "typal coupling", "noncreature typal"],
+    Role("typal", "Typal / tribal payoffs",
+         "Lords and cards that reward a specific creature type. This counts "
+         "payoffs only - how concentrated the creatures themselves are is "
+         "measured separately.",
+         tags=["typal", "typal coupling", "noncreature typal", "typal-creature"],
+         axis=True),
+
+    Role("counters_matter", "+1/+1 counters",
+         "Counter placement, proliferate, and the payoffs that scale off them.",
+         tags=["counters matter", "pp counters matter", "repeatable-proliferate",
+               "gives pp counters", "repeatable pp counters", "gains pp counters",
+               "counter increaser", "move counters", "counter fuel-pp"],
+         text=r"(\+1/\+1 counter|proliferate)",
          axis=True),
 
     # --- descriptive-only roles (not distance axes) ------------------------- #
@@ -236,11 +246,7 @@ ROLES: List[Role] = [
          tags=["synergy-enchantment", "enchantment engine"],
          text=r"enchantments? you control"),
 
-    Role("counters_matter", "+1/+1 counters",
-         "Counter placement and proliferate payoffs.",
-         tags=["counters matter", "pp counters matter", "repeatable-proliferate",
-               "gives pp counters"],
-         text=r"\+1/\+1 counter"),
+
 
     Role("utility_land", "Utility lands",
          "Lands that do more than make mana.",

@@ -8,7 +8,7 @@ It does three things:
 1. **Descriptive statistics** - mana curve, land count against a curve-aware
    target, colour pips versus colour sources, type breakdown, and a
    role-by-role account of what the cards in the deck actually do.
-2. **Partial classification** - measures the distance from the deck to twelve
+2. **Partial classification** - measures the distance from the deck to thirteen
    archetype reference profiles and reports the result as a *mixture*
    ("58% Aristocrats, 22% Go-Wide Aggro"), plus a focus score for how
    committed the deck is to any plan at all.
@@ -47,7 +47,7 @@ Other commands:
 | Command | What it does |
 | --- | --- |
 | `mtgcoach analyze DECK` | the full report (default; `mtgcoach DECK` also works) |
-| `mtgcoach archetypes` | the twelve reference profiles and their game plans |
+| `mtgcoach archetypes` | the thirteen reference profiles and their game plans |
 | `mtgcoach roles` | the functional role vocabulary |
 | `mtgcoach card NAME...` | the Scryfall tags and roles of individual cards |
 | `mtgcoach fit KEY DECK...` | build a new archetype profile by averaging decks |
@@ -101,16 +101,32 @@ type-line patterns act as a backstop for cards Tagger has not reached.
 Deliberate detail: land tutors (Rampant Growth) count as **ramp** and not as
 **tutors**, because for deckbuilding purposes they are not the same thing.
 
+The `typal` role deliberately counts *payoffs* only - lords and cards that name
+a creature type. How concentrated the creatures themselves are is a separate
+measurement (below), because a deck can have thirty Elementals and no payoffs,
+or six payoffs and no Elementals, and those need different advice.
+
 `mtgcoach roles` prints the whole vocabulary; `mtgcoach card "Beast Within"`
 shows how a single card was read.
 
 ### Feature vector
 
-26 dimensions: 19 role densities plus 7 shape features (creature share,
-instant/sorcery share, noncreature permanent share, normalised average mana
-value, cheap-spell share, top-end share, land share). Role densities are
-expressed as a share of the deck's **nonland** cards, so decks of slightly
-different shapes stay comparable.
+28 dimensions: 20 role densities plus 8 shape features (creature-type
+concentration, creature share, instant/sorcery share, noncreature permanent
+share, normalised average mana value, cheap-spell share, top-end share, land
+share). Role densities are expressed as a share of the deck's **nonland**
+cards, so decks of slightly different shapes stay comparable.
+
+**Creature-type concentration** is the share of creatures sharing the deck's
+dominant type. Changelings count as whatever the tribe turns out to be, and
+when the commander is a creature - or carries a `typal-<type>` tag - its own
+type gets first refusal on near-ties, so an Elemental commander means the deck
+is measured on Elementals.
+
+**The commander is weighted up.** It is castable in every single game, so it
+says more about the deck than any one of the other 99 cards; role densities
+count it three times (`features.COMMANDER_WEIGHT`). The descriptive counts in
+the report stay honest at one card.
 
 ### Distance and partial classification
 
@@ -137,9 +153,9 @@ archetypes rather than a single label. Two derived numbers matter:
 
 ### Archetype profiles
 
-Twelve hand-authored profiles: Go-Wide Aggro, Voltron, Midrange Value,
+Thirteen hand-authored profiles: Go-Wide Aggro, Voltron, Midrange Value,
 Control, Combo, Stax/Prison, Big Mana, Lands Matter, Aristocrats, Reanimator,
-Spellslinger and Typal.
+Spellslinger, +1/+1 Counters and Typal.
 
 They are **expert priors, not fitted parameters**. Each one states only the
 features it takes a position on; everything else falls back to `BASELINE`, a
@@ -165,6 +181,14 @@ a curve-aware target (adjusted for cheap ramp, MDFC land backs, and the
 archetype's own appetite for lands), total mana sources, coloured sources
 against coloured pips, card draw, interaction, board wipes, curve, and format
 legality (100 cards, singleton, colour identity, commander eligibility).
+
+Curve advice reads the commander first. A commander that discounts or caps
+casting costs, casts things for free, or puts permanents onto the battlefield
+directly lets the deck support a genuinely higher curve, so the land target and
+the "lower your curve" threshold both work from an **effective** average mana
+value that subtracts that allowance. A deck led by a commander granting
+`evoke {4}` to everything is not playing the same curve as its raw average
+suggests.
 
 **Direction** compares the deck against a blend of its two nearest archetypes -
 or against `--target` if you name a goal. The largest weighted gaps become
@@ -198,9 +222,10 @@ Three guards keep this from producing nonsense on decks that are already good:
 python3 -m unittest discover -s tests -v
 ```
 
-31 tests: parsing, role assignment, feature maths, legality checks, distance
-and mixture properties, advice guards, plus an end-to-end check that each
-sample deck classifies as intended (skipped if the Scryfall cache is empty).
+39 tests: parsing, role assignment, creature-type concentration, commander
+weighting and curve allowance, feature maths, legality checks, distance and
+mixture properties, advice guards, plus an end-to-end check that each sample
+deck classifies as intended (skipped if the Scryfall cache is empty).
 
 ## Layout
 
@@ -210,12 +235,12 @@ mtgcoach/
   decklist.py    decklist parsing and commander detection
   roles.py       the functional role vocabulary and its matching rules
   features.py    descriptive statistics, feature vector, legality checks
-  archetypes.py  the twelve reference profiles
+  archetypes.py  the thirteen reference profiles
   classify.py    distance, softmax mixture, focus, blended target
   advice.py      fundamentals and direction recommendation passes
   report.py      terminal and JSON rendering
   cli.py         argument parsing and command dispatch
-decks/           four exemplar decks plus one deliberately rough beginner deck
+decks/           six exemplar decks plus one deliberately rough beginner deck
 tests/           unit and end-to-end tests
 ```
 

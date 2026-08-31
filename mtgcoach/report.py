@@ -83,8 +83,13 @@ def render(analysis: DeckAnalysis, classification: Classification,
     add("  %-22s %d  (target for this curve: %d)"
         % ("Lands", analysis.land_count, target_lands))
     add("  %-22s %d" % ("Spells", analysis.nonland_count))
-    add("  %-22s %.2f  (median %.1f)" % ("Average mana value", analysis.avg_mv,
-                                         analysis.median_mv))
+    if analysis.commander_curve_allowance:
+        add("  %-22s %.2f  (median %.1f; %.2f allowing for your commander)"
+            % ("Average mana value", analysis.avg_mv, analysis.median_mv,
+               analysis.effective_avg_mv()))
+    else:
+        add("  %-22s %.2f  (median %.1f)" % ("Average mana value",
+                                             analysis.avg_mv, analysis.median_mv))
     add("  %-22s %d  (%d lands + %d ramp)"
         % ("Mana sources", analysis.mana_sources(), analysis.land_count,
            analysis.role_counts.get("ramp", 0)))
@@ -92,7 +97,35 @@ def render(analysis: DeckAnalysis, classification: Classification,
         analysis.type_counts.items(), key=lambda kv: -kv[1]))
     for line in wrap("Types: " + types, indent=2):
         add(line)
+    if analysis.dominant_type and analysis.creature_count:
+        share = 100.0 * analysis.dominant_type_count / analysis.creature_count
+        add("  %-22s %s %d of %d creatures (%.0f%%)"
+            % ("Main creature type", analysis.dominant_type,
+               analysis.dominant_type_count, analysis.creature_count, share))
     add("")
+
+    # ---- commander ------------------------------------------------------- #
+    if analysis.commanders:
+        add(_rule("YOUR COMMANDER", st))
+        for cmdr in analysis.commanders:
+            add("  %s  %s" % (cmdr.name, cmdr.card.get("mana_cost", "")))
+            add("  %s" % cmdr.card.get("type_line", ""))
+            labels = [ROLES_BY_KEY[r].label for r in sorted(cmdr.roles)
+                      if r in ROLES_BY_KEY]
+            if labels:
+                for line in wrap("Does: " + ", ".join(labels), indent=2):
+                    add(line)
+        if analysis.commander_notes:
+            for line in wrap("Because your commander %s, this deck can "
+                             "support a higher curve than usual - the land and "
+                             "curve advice below already accounts for that."
+                             % " and ".join(analysis.commander_notes), indent=2):
+                add(line)
+        for line in wrap("(your commander is castable every game, so it "
+                         "counts for more than one card when measuring what "
+                         "this deck does)", indent=2):
+            add(st.dim(line))
+        add("")
 
     # ---- curve ----------------------------------------------------------- #
     add(_rule("MANA CURVE (spells only)", st))
@@ -240,6 +273,7 @@ def to_json(analysis: DeckAnalysis, classification: Classification,
         "deck": deck_name,
         "target_archetype": target.key if target is not None else None,
         "commanders": [c.name for c in analysis.commanders],
+        "commander_notes": list(analysis.commander_notes),
         "color_identity": analysis.commander_identity or analysis.color_identity,
         "stats": {
             "total_cards": analysis.total,
@@ -247,6 +281,10 @@ def to_json(analysis: DeckAnalysis, classification: Classification,
             "spells": analysis.nonland_count,
             "recommended_lands": recommended_lands(analysis, classification),
             "average_mana_value": round(analysis.avg_mv, 3),
+            "effective_average_mana_value": round(analysis.effective_avg_mv(), 3),
+            "main_creature_type": analysis.dominant_type,
+            "main_creature_type_count": analysis.dominant_type_count,
+            "creature_count": analysis.creature_count,
             "median_mana_value": analysis.median_mv,
             "mana_sources": analysis.mana_sources(),
             "curve": dict(analysis.curve),

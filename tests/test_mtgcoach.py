@@ -193,6 +193,113 @@ class TestFeatures(unittest.TestCase):
         self.assertEqual(an.total, 1)
 
 
+class TestCreatureTypes(unittest.TestCase):
+    def _analyse(self, deck_text, cards_list, tags=None):
+        parsed, cards, tag_map = build(cards_list, deck_text, tags)
+        return features.analyze(parsed, cards, tag_map)
+
+    def test_concentration_of_a_tribal_deck(self):
+        cards_list = [
+            card("Plains", cost="", mv=0.0, type_line="Basic Land — Plains"),
+            card("Elemental A", type_line="Creature — Elemental"),
+            card("Elemental B", type_line="Creature — Elemental Shaman"),
+            card("Random Bear", type_line="Creature — Bear"),
+        ]
+        an = self._analyse(
+            "1 Elemental A\n1 Elemental B\n1 Random Bear\n1 Plains\n", cards_list)
+        self.assertEqual(an.dominant_type, "Elemental")
+        self.assertEqual(an.creature_count, 3)
+        self.assertAlmostEqual(an.vector["typal_concentration"], 2 / 3.0)
+
+    def test_changelings_count_as_the_tribe(self):
+        cards_list = [
+            card("Elemental A", type_line="Creature — Elemental"),
+            card("Elemental B", type_line="Creature — Elemental"),
+            card("Universal Automaton",
+                 type_line="Creature — Shapeshifter",
+                 text="Changeling (This card is every creature type.)"),
+        ]
+        an = self._analyse(
+            "1 Elemental A\n1 Elemental B\n1 Universal Automaton\n", cards_list)
+        self.assertEqual(an.dominant_type, "Elemental")
+        self.assertAlmostEqual(an.vector["typal_concentration"], 1.0)
+
+    def test_commander_type_wins_a_near_tie(self):
+        # Four Humans, three Elementals, but the commander is an Elemental
+        # payoff, so the deck is measured on Elementals.
+        cards_list = [card("Elemental %d" % i, type_line="Creature — Elemental")
+                      for i in range(3)]
+        cards_list += [card("Human %d" % i, type_line="Creature — Human")
+                       for i in range(4)]
+        cards_list.append(card("Ashling", type_line="Legendary Creature — Elemental"))
+        text = ("// Commander\n1 Ashling\n\n// Deck\n"
+                + "\n".join("1 Elemental %d" % i for i in range(3)) + "\n"
+                + "\n".join("1 Human %d" % i for i in range(4)) + "\n")
+        an = self._analyse(text, cards_list)
+        self.assertEqual(an.dominant_type, "Elemental")
+
+    def test_typal_tag_identifies_the_tribe_a_commander_pumps(self):
+        cards_list = [card("Goblin %d" % i, type_line="Creature — Goblin")
+                      for i in range(3)]
+        cards_list += [card("Elf %d" % i, type_line="Creature — Elf")
+                       for i in range(3)]
+        cards_list.append(card("Goblin Lord",
+                               type_line="Legendary Creature — Human Advisor"))
+        text = ("// Commander\n1 Goblin Lord\n\n// Deck\n"
+                + "\n".join("1 Goblin %d" % i for i in range(3)) + "\n"
+                + "\n".join("1 Elf %d" % i for i in range(3)) + "\n")
+        tags = {"oid-goblin-lord": ["typal", "typal-goblin"]}
+        an = self._analyse(text, cards_list, tags)
+        self.assertEqual(an.dominant_type, "Goblin")
+
+
+class TestCommanderInfluence(unittest.TestCase):
+    def test_commander_roles_are_weighted_above_a_single_copy(self):
+        cards_list = [
+            card("Plains", cost="", mv=0.0, type_line="Basic Land — Plains"),
+            card("Big Boss", type_line="Legendary Creature — Human",
+                 text="Counter target spell."),
+        ]
+        cards_list += [card("Filler %d" % i, type_line="Creature — Bear")
+                       for i in range(9)]
+        text = ("// Commander\n1 Big Boss\n\n// Deck\n"
+                + "\n".join("1 Filler %d" % i for i in range(9))
+                + "\n36 Plains\n")
+        parsed, cards, tags = build(cards_list, text)
+        an = features.analyze(parsed, cards, tags)
+        self.assertEqual(an.role_counts["counterspell"], 1)   # honest count
+        self.assertEqual(an.nonland_count, 10)
+        self.assertGreater(an.vector["counterspell"], 1.0 / an.nonland_count)
+
+    def test_cost_reduction_commander_raises_the_supported_curve(self):
+        cards_list = [
+            card("Plains", cost="", mv=0.0, type_line="Basic Land — Plains"),
+            card("Expensive Thing", cost="{7}", mv=7.0, type_line="Creature — Giant"),
+            card("Discount Lord", cost="{2}{W}", mv=3.0,
+                 type_line="Legendary Creature — Human",
+                 text="Creature spells you cast cost {2} less to cast."),
+        ]
+        text = ("// Commander\n1 Discount Lord\n\n// Deck\n"
+                "1 Expensive Thing\n36 Plains\n")
+        parsed, cards, tags = build(cards_list, text)
+        an = features.analyze(parsed, cards, tags)
+        self.assertTrue(an.commander_notes)
+        self.assertLess(an.effective_avg_mv(), an.avg_mv)
+        self.assertLess(advice.recommended_lands(an),
+                        int(round(36 + 2.4 * (an.avg_mv - 3.0))))
+
+    def test_plain_commander_gets_no_allowance(self):
+        cards_list = [
+            card("Plains", cost="", mv=0.0, type_line="Basic Land — Plains"),
+            card("Vanilla Boss", type_line="Legendary Creature — Human"),
+        ]
+        parsed, cards, tags = build(
+            cards_list, "// Commander\n1 Vanilla Boss\n\n// Deck\n1 Plains\n")
+        an = features.analyze(parsed, cards, tags)
+        self.assertEqual(an.commander_notes, [])
+        self.assertAlmostEqual(an.effective_avg_mv(), an.avg_mv)
+
+
 class TestClassification(unittest.TestCase):
     def test_archetype_profile_matches_itself(self):
         for arch in archetypes.ARCHETYPES:
@@ -305,6 +412,16 @@ class TestAdvice(unittest.TestCase):
         self.assertTrue(any("does not read as Voltron" in t for t in titles),
                         titles)
 
+    def test_split_plan_note_needs_a_real_second_plan(self):
+        # A deck that is 60/10 has a clear plan even if entropy over a dozen
+        # archetypes reads low; it must not be told it is split.
+        an = self._analysis()
+        an.vector = dict(archetypes.ARCHETYPES_BY_KEY["voltron"].profile)
+        result = classify.classify(an.vector)
+        notes = advice.focus_note(an, result)
+        self.assertFalse(any("split between two plans" in r.title
+                             for r in notes))
+
     def test_recommendations_are_deduplicated_and_sorted(self):
         an = self._analysis(draw=2, spot=0, mass=0, lands=30, avg_mv=4.6)
         result = classify.classify(an.vector)
@@ -323,6 +440,8 @@ class TestEndToEnd(unittest.TestCase):
         "ephara_control.txt": "control",
         "sram_voltron.txt": "voltron",
         "hearthhull_lands.txt": "lands_matter",
+        "dance_of_the_elementals.txt": "typal",
+        "counter_blitz.txt": "counters",
     }
 
     def test_sample_decks_classify_as_intended(self):
