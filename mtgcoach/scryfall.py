@@ -24,6 +24,7 @@ import os
 import time
 import unicodedata
 import urllib.error
+import urllib.parse
 import urllib.request
 import re
 from typing import Dict, List, Optional, Sequence, Set, Tuple
@@ -141,6 +142,27 @@ def _http(url: str, data: Optional[bytes] = None, timeout: int = 90,
             last_err = exc
             time.sleep(0.5 * (2 ** attempt))
     raise ScryfallError("request to %s failed: %s" % (url, last_err))
+
+
+def _fetch_by_flavor_name(name: str) -> Optional[dict]:
+    """Single-card lookup that also matches ``flavor_name``.
+
+    ``/cards/collection`` only matches a card's real (Oracle) name, so a
+    Universes Beyond crossover printed under an alternate name - Marvel's
+    "Awesome Android" is really Containment Construct, Godzilla's kaiju names
+    are their own separate reprints, etc. - comes back "not found" even
+    though Scryfall knows the card. ``/cards/named?exact=`` checks both.
+    """
+    url = API + "/cards/named?exact=" + urllib.parse.quote(name)
+    _throttle()
+    req = urllib.request.Request(url, headers=HEADERS)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise ScryfallError("request to %s failed: %s" % (url, exc))
 
 
 # --------------------------------------------------------------------------- #
@@ -297,10 +319,19 @@ def fetch_cards(names: Sequence[str], offline: bool = False,
                 resolved[key] = alias
                 dirty = True
             else:
-                # Negative results are deliberately not cached: a typo fixed
-                # upstream, or a bug in how we build identifiers, would
-                # otherwise stay "missing" forever.
-                missing.append(req)
+                raw = _fetch_by_flavor_name(req)
+                if raw is not None:
+                    card = _face_aware(raw)
+                    names = {card["name"], req, raw.get("flavor_name") or req}
+                    for name in names:
+                        cache[normalize_name(name)] = card
+                        resolved[normalize_name(name)] = card
+                    dirty = True
+                else:
+                    # Negative results are deliberately not cached: a typo
+                    # fixed upstream, or a bug in how we build identifiers,
+                    # would otherwise stay "missing" forever.
+                    missing.append(req)
 
     if dirty:
         _write_json(cache_file, {"schema": CARD_CACHE_SCHEMA, "cards": cache})
