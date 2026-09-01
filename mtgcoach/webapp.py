@@ -50,6 +50,42 @@ def list_roles() -> list:
     return [{"key": r.key, "label": r.label} for r in ROLES]
 
 
+# Same thresholds report.py uses for the terminal output - kept here so the
+# web UI's "playstyle" narrative reads identically to `mtgcoach analyze`.
+def _focus_label(focus: float) -> str:
+    if focus >= 0.70:
+        return "sharply focused"
+    if focus >= 0.45:
+        return "reasonably focused"
+    return "unfocused"
+
+
+def _playstyle(classification: "classify.Classification",
+               target: Optional["archetypes_mod.Archetype"]) -> dict:
+    best = classification.best
+    result = {
+        "archetype": best.archetype.key,
+        "name": best.archetype.name,
+        "blurb": best.archetype.blurb,
+        "plan": best.archetype.plan,
+        "watch_out": best.archetype.watch_out,
+        "focus": round(classification.focus, 4),
+        "focus_label": _focus_label(classification.focus),
+        "aiming_at": None,
+    }
+    if target is not None and target.key != best.archetype.key:
+        aimed = next((m for m in classification.matches
+                      if m.archetype.key == target.key), None)
+        if aimed is not None:
+            result["aiming_at"] = {
+                "archetype": target.key,
+                "name": target.name,
+                "affinity": round(aimed.affinity, 4),
+                "fit": round(aimed.fit, 4),
+            }
+    return result
+
+
 def analyze_deck(deck_text: Optional[str] = None, deck_name: Optional[str] = None,
                  commander: Optional[Sequence[str]] = None,
                  target_key: Optional[str] = None,
@@ -96,6 +132,7 @@ def analyze_deck(deck_text: Optional[str] = None, deck_name: Optional[str] = Non
                              target=target, cuts=cut_list)
     payload["warnings"] = parsed.warnings
     payload["missing_cards"] = missing
+    payload["playstyle"] = _playstyle(classification, target)
     for cut in payload["cut_candidates"]:
         card = cards.get(scryfall.normalize_name(cut["name"]))
         cut["image"] = card.get("image") if card else None

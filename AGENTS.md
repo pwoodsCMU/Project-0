@@ -81,15 +81,19 @@ swap_budget, legality, unresolved
 
 If you change this shape, treat it as a breaking API change.
 
-`webapp.py` layers three extra keys onto that payload before sending it to the
+`webapp.py` layers extra keys onto that payload before sending it to the
 browser: `warnings` (from `ParsedDeck.warnings`), `missing_cards` (from
-`scryfall.fetch_cards`), and an `image` field added to each entry in
+`scryfall.fetch_cards`), an `image` field added to each entry in
 `cut_candidates` (a Scryfall image URL, looked up from the already-fetched
-card dict — not part of `report.to_json()` itself). If you go looking for
-`image` in `report.py`/`advice.py` and don't find it, that's why — it's
-assembled in `webapp.analyze_deck`, deliberately, so the CLI's JSON output
-stays exactly the documented contract and only the web UI carries the extra
-weight.
+card dict — not part of `report.to_json()` itself), and `playstyle`
+(`{archetype, name, blurb, plan, watch_out, focus, focus_label, aiming_at}`,
+computed by `webapp._playstyle` from `classification.best` and, when a
+target was requested, the aimed-at match — the same numbers and wording
+`report.render`'s "ARCHETYPE DISTANCE" section prints to the terminal). If
+you go looking for `image` or `playstyle` in `report.py`/`advice.py` and
+don't find them, that's why — they're assembled in `webapp.analyze_deck`,
+deliberately, so the CLI's JSON output stays exactly the documented contract
+and only the web UI carries the extra weight.
 
 ## Caching, and the trap in it
 
