@@ -111,6 +111,18 @@
   .cut-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
   .cut-reason { font-size: 12px; color: var(--muted); }
   .attribution { font-size: 11px; color: var(--muted); margin: 10px 0 0; }
+  .deck-header { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+  .deck-header-info { flex: 1; min-width: 220px; }
+  .commander-strip { display: flex; gap: 10px; flex-shrink: 0; }
+  .commander-card { width: 110px; }
+  .commander-card img { display: block; width: 100%; aspect-ratio: 488 / 680;
+                         object-fit: cover; border-radius: 6px; border: 1px solid var(--border); }
+  .commander-noimg { width: 100%; aspect-ratio: 488 / 680; border-radius: 6px;
+                      border: 1px solid var(--border); background: #14171f; display: flex;
+                      align-items: center; justify-content: center; text-align: center;
+                      padding: 8px; font-size: 11px; color: var(--muted); }
+  .commander-name { font-size: 11px; color: var(--muted); text-align: center; margin-top: 4px;
+                     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -297,6 +309,17 @@ function cutTable(cuts) {
     <p class="attribution">Card images via Scryfall.</p>`;
 }
 
+function commanderStrip(images) {
+  if (!images || !images.length) return '';
+  return `<div class="commander-strip">${images.map(c => `
+    <div class="commander-card">
+      ${c.image
+        ? `<img src="${esc(c.image)}" alt="${esc(c.name)}" loading="lazy">`
+        : `<div class="commander-noimg">${esc(c.name)}</div>`}
+      <div class="commander-name">${esc(c.name)}</div>
+    </div>`).join('')}</div>`;
+}
+
 function themeList(themes) {
   if (!themes.length) return '<p class="muted">No standout themes found.</p>';
   return themes.map(t =>
@@ -347,9 +370,14 @@ function render(data) {
 
   $('results').innerHTML = `
     <div class="panel">
-      <h2>${esc(data.deck || 'Deck')}</h2>
-      <p>${esc(commanders)} — color identity ${esc((data.color_identity || []).join('') || 'C')}</p>
-      ${statGrid(data.stats, data.roles)}
+      <div class="deck-header">
+        ${commanderStrip(data.commander_images)}
+        <div class="deck-header-info">
+          <h2>${esc(data.deck || 'Deck')}</h2>
+          <p>${esc(commanders)} — color identity ${esc((data.color_identity || []).join('') || 'C')}</p>
+          ${statGrid(data.stats, data.roles)}
+        </div>
+      </div>
     </div>
     ${warnBlock}
     <div class="panel"><h2>Key roles</h2>${roleList(data.roles)}</div>

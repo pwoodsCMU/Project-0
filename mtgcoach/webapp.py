@@ -99,6 +99,13 @@ def analyze_deck(deck_text: Optional[str] = None, deck_name: Optional[str] = Non
     for cut in payload["cut_candidates"]:
         card = cards.get(scryfall.normalize_name(cut["name"]))
         cut["image"] = card.get("image") if card else None
+    # One entry per commander (partner decks have two), same order as
+    # payload["commanders"].
+    payload["commander_images"] = []
+    for name in payload["commanders"]:
+        card = cards.get(scryfall.normalize_name(name))
+        payload["commander_images"].append(
+            {"name": name, "image": card.get("image") if card else None})
     return payload
 
 
