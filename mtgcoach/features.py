@@ -61,7 +61,7 @@ COMMANDER_COST_PATTERNS = [
     (r"you may cast .{0,60}(?:from your graveyard|from exile|from the top)",
      "casts cards from outside your hand", 0.3),
     (r"put(?:s)? .{0,60}onto the battlefield",
-     "puts permanents onto the battlefield directly", 0.3),
+     "puts permanents onto the battlefield directly", 0.5),
 ]
 
 # Shape features that sit alongside the role densities in the feature vector.
