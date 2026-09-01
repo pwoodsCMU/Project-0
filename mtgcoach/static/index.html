@@ -123,7 +123,19 @@
                       padding: 8px; font-size: 11px; color: var(--muted); }
   .commander-name { font-size: 11px; color: var(--muted); text-align: center; margin-top: 4px;
                      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .archetype-name { cursor: help; border-bottom: 1px dotted var(--muted); }
+  .archetype-name {
+    position: relative; cursor: help; border-bottom: 1px dotted var(--muted);
+  }
+  .archetype-name::after {
+    content: attr(data-tip); position: absolute; left: 0; top: 100%;
+    margin-top: 6px; width: max-content; max-width: 260px; white-space: normal;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 9px; font-size: 12px; font-weight: 400; line-height: 1.4;
+    color: var(--text); box-shadow: 0 4px 12px rgba(0,0,0,.4);
+    opacity: 0; pointer-events: none; transition: opacity .08s ease .05s;
+    z-index: 20;
+  }
+  .archetype-name:hover::after { opacity: 1; }
   .playstyle p { margin: 0 0 8px; }
   .playstyle p:last-child { margin-bottom: 0; }
 </style>
@@ -267,7 +279,7 @@ function classificationTable(c) {
     const pct = Math.round(m.fit * 100);
     const blurb = ARCHETYPE_BLURBS[m.archetype] || '';
     return `<tr>
-      <td class="archetype-name" title="${esc(blurb)}">${esc(m.name)}</td>
+      <td class="archetype-name" data-tip="${esc(blurb)}">${esc(m.name)}</td>
       <td><div class="fit-cell"><div class="fit-track">
         <div class="fit-fill" style="width:${pct}%"></div></div> ${pct}%</div></td>
       <td>${m.theme_support.toFixed(2)}</td>
