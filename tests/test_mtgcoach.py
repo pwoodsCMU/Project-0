@@ -10,8 +10,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from mtgcoach import (advice, archetypes, classify, decklist, features, roles,
-                      scryfall, synergy)
+from mtgcoach import (advice, archetypes, classify, corpus, decklist, features,
+                      roles, scryfall, synergy)
 from mtgcoach.scryfall import normalize_name
 
 
@@ -1026,6 +1026,128 @@ class TestThemesFeedClassification(unittest.TestCase):
         for a, b in zip(plain.matches, themed.matches):
             if a.archetype.key == b.archetype.key:
                 self.assertLessEqual(b.distance, a.distance + 1e-9)
+
+
+class TestCorpusReplaceability(unittest.TestCase):
+    """Comparison-class scoring: how a card stacks up against the alternatives."""
+
+    def _corpus(self):
+        # oracle_id -> (rank, mana_value, colour mask, roles, game_changer)
+        green = corpus.color_mask(["G"])
+        blue = corpus.color_mask(["U"])
+        entries = {}
+        for i in range(10):
+            entries["green-ramp-%d" % i] = (
+                100 * (i + 1), 3.0, green, ["ramp"], False)
+        for i in range(10):
+            entries["blue-ramp-%d" % i] = (
+                10 + i, 3.0, blue, ["ramp"], False)
+        return corpus.Corpus(entries)
+
+    def test_best_in_class_scores_zero(self):
+        index = self._corpus()
+        # Rank 1 beats every green ramp spell at this cost.
+        self.assertEqual(
+            index.better_fraction(["ramp"], 3.0, 1, corpus.color_mask(["G"])), 0.0)
+
+    def test_worst_in_class_scores_near_one(self):
+        index = self._corpus()
+        fraction = index.better_fraction(["ramp"], 3.0, 99999,
+                                         corpus.color_mask(["G"]))
+        self.assertGreater(fraction, 0.9)
+
+    def test_peers_outside_the_colour_identity_are_excluded(self):
+        index = self._corpus()
+        # In mono-green the ten better-ranked blue cards must not count.
+        mono = index.better_fraction(["ramp"], 3.0, 500,
+                                     corpus.color_mask(["G"]))
+        both = index.better_fraction(["ramp"], 3.0, 500,
+                                     corpus.color_mask(["G", "U"]))
+        self.assertLess(mono, both)
+
+    def test_peers_at_a_very_different_cost_are_excluded(self):
+        index = self._corpus()
+        self.assertIsNone(
+            index.better_fraction(["ramp"], 9.0, 500, corpus.color_mask(["G"])))
+
+    def test_no_comparison_class_returns_none(self):
+        index = self._corpus()
+        self.assertIsNone(index.better_fraction([], 3.0, 500, 31))
+        self.assertIsNone(index.better_fraction(["ramp"], 3.0, None, 31))
+        self.assertIsNone(
+            index.better_fraction(["counterspell"], 3.0, 500, 31))
+
+    def test_replaceability_bonus_falls_as_better_options_pile_up(self):
+        best = advice._replaceability_bonus(0.0)
+        middling = advice._replaceability_bonus(0.10)
+        poor = advice._replaceability_bonus(0.50)
+        self.assertGreater(best, middling)
+        self.assertGreater(middling, poor)
+
+    def test_annotate_scores_spells_and_skips_lands(self):
+        cards_list = [
+            card("Forest", cost="", mv=0.0, type_line="Basic Land — Forest"),
+            card("Boss", type_line="Legendary Creature — Human"),
+            card("Slow Ramp", cost="{2}{G}", mv=3.0, type_line="Sorcery",
+                 text="Search your library for a basic land card.",
+                 colors=["G"]),
+        ]
+        cards_list[2]["edhrec_rank"] = 900
+        parsed, cards, tags = build(
+            cards_list, "// Commander\n1 Boss\n\n// Deck\n1 Slow Ramp\n36 Forest\n")
+        an = features.analyze(parsed, cards, tags)
+        corpus.annotate(an, self._corpus())
+        ramp = next(e for e in an.entries if e.name == "Slow Ramp")
+        forest = next(e for e in an.entries if e.name == "Forest")
+        self.assertIsNotNone(ramp.replaceability)
+        self.assertIsNone(forest.replaceability)
+
+    def test_a_missing_corpus_is_survivable(self):
+        parsed, cards, tags = build(
+            [card("Forest", cost="", mv=0.0, type_line="Basic Land — Forest")],
+            "1 Forest\n")
+        an = features.analyze(parsed, cards, tags)
+        corpus.annotate(an, None)      # must not raise
+        self.assertTrue(all(e.replaceability is None for e in an.entries))
+
+
+class TestGameChangers(unittest.TestCase):
+    """Game Changers raise a deck's power bracket, which casual tables may not
+    want. They are a caution, never a reason to keep a card."""
+
+    def _deck(self):
+        cards_list = [
+            card("Plains", cost="", mv=0.0, type_line="Basic Land — Plains"),
+            card("Boss", type_line="Legendary Creature — Human"),
+            # Deliberately fills no universal role, so the only thing that
+            # could protect it is its Game Changer status.
+            card("Bracket Pusher", cost="{5}{U}", mv=6.0,
+                 type_line="Creature — Avatar", colors=["U"]),
+        ]
+        cards_list[2]["game_changer"] = True
+        cards_list[2]["edhrec_rank"] = 20000
+        parsed, cards, tags = build(
+            cards_list,
+            "// Commander\n1 Boss\n\n// Deck\n1 Bracket Pusher\n36 Plains\n")
+        return features.analyze(parsed, cards, tags)
+
+    def test_game_changers_raise_a_caution(self):
+        an = self._deck()
+        result = classify.classify(an.vector, themes=an.themes)
+        recs = advice.all_recommendations(an, result)
+        bracket = [r for r in recs if r.kind == "bracket"]
+        self.assertTrue(bracket)
+        self.assertIn("Bracket Pusher", bracket[0].detail)
+
+    def test_a_game_changer_is_not_protected_from_being_cut(self):
+        # Being format-warping is not a reason to keep a card in a casual
+        # deck, so it must not act like staple protection.
+        an = self._deck()
+        entry = next(e for e in an.entries if e.name == "Bracket Pusher")
+        self.assertTrue(entry.game_changer)
+        result = classify.classify(an.vector, themes=an.themes)
+        names = [c.name for c in advice.cut_candidates(an, result, limit=99)]
+        self.assertIn("Bracket Pusher", names)
 
 
 class TestEndToEnd(unittest.TestCase):

@@ -53,7 +53,8 @@ Other commands:
 | `mtgcoach fit KEY DECK...` | build a new archetype profile by averaging decks |
 
 Useful flags: `--json out.json`, `--offline`, `--top N`, `--roles N`,
-`--blend N`, `--cuts N`, `--profiles FILE`, `--refresh-tags`, `--no-color`.
+`--blend N`, `--cuts N`, `--profiles FILE`, `--refresh-tags`,
+`--refresh-corpus`, `--no-color`.
 
 ## Decklist format
 
@@ -335,6 +336,50 @@ This is the one place the tool names specific cards, and only ever cards the
 player already owns - "what should I cut" has no useful role-level answer. The
 list never runs longer than the number of slots the advice actually needs.
 
+### Replaceability
+
+`edhrec_rank` says how widely a card is played across all of Commander. Used
+directly it answers the wrong question - it reports that Burnished Hart is
+reasonably popular (rank 488), not that better green ramp exists at the same
+cost. What a cut list actually ranks is *replaceability*:
+
+> of the cards this deck could play that do the same job at a similar cost,
+> how many are played more than this one?
+
+`corpus.py` answers that. It downloads Scryfall's `oracle-cards` bulk file
+once, indexes every Commander-legal card EDHREC ranks - about 32,000 - by
+role, mana value and colour identity, and compares each card in your deck
+against the ones you could actually cast instead. The index is ~1 MB gzipped,
+takes about three seconds to build and reloads in 0.05s; `--refresh-corpus`
+rebuilds it.
+
+Measuring how many cards are *better* rather than what fraction a card beats
+matters, because every class has a long tail of unplayable cards that flatters
+anything remotely reasonable. Sol Ring, Cultivate and Beast Within come out at
+0.00; Generous Ent at 0.20, Teapot Slinger at 0.27, Orchard Strider at 0.48 -
+which is the ordering upgrade guides act on. Cut reasons say so in words:
+"about 42% of the cards you could play instead, at this cost and for this job,
+are played more".
+
+This sits alongside the other two quality signals rather than replacing them,
+because each has a distinct job:
+
+| Signal | Answers | Catches |
+| --- | --- | --- |
+| Commander condition | can my commander even use this? | Burnished Hart in a Bello deck |
+| Discovered themes | does this serve what the deck is built on? | Unbound Flourishing |
+| Replaceability | is there a better version of this card? | Orchard Strider, Teapot Slinger |
+
+### Game Changers are a caution, not an endorsement
+
+Scryfall carries a `game_changer` flag for the 53 cards on Wizards' Commander
+Brackets list. It is tempting to treat those as cards to protect. This tool
+does the opposite: they are flagged as a *power-level* note, because a Game
+Changer moves a deck up a bracket, and this tool is aimed at the casual end of
+the format where that is often not what the player wants. Being format-warping
+is never a reason to keep a card here, and the flag deliberately does not
+shield anything from the cut list.
+
 ### Validation against community upgrade guides
 
 EDHREC publishes, per preconstructed deck, the share of players who cut each
@@ -378,11 +423,12 @@ through popularity.
   ten bad draw spells and ten good ones look identical here. The cut list
   softens this with EDHREC rank, but rank measures popularity, not power, and
   a card can be both unpopular and exactly right for your deck.
-- Card quality is approximated by EDHREC rank, which measures how widely a
-  card is played rather than how good it is in your deck. It tracks community
-  cut decisions closely, but it will always undervalue a niche card that is
-  right for your build, and it cannot see that two cards are redundant with
-  each other specifically.
+- Card quality is approximated from EDHREC rank, which measures how widely a
+  card is played rather than how good it is. Comparing within a deck's own
+  colours, roles and costs corrects much of that - a niche card that is the
+  best available answer scores well even with a poor global rank - but
+  popularity still lags new printings and favours cards legal in more decks.
+  Nothing here can see that two specific cards are redundant with each other.
 - Theme discovery finds *correlation in tags*, not the actual combo. It can
   tell that a deck is built on {X} spells; it cannot tell that two particular
   cards win on the spot together.
@@ -396,11 +442,12 @@ through popularity.
 python3 -m unittest discover -s tests -v
 ```
 
-81 tests: parsing, split-card identifiers, partner pairing and inference, role
+91 tests: parsing, split-card identifiers, partner pairing and inference, role
 assignment, creature-type concentration, theme discovery by tag lift, {X}
 spell costing, commander weighting, curve allowance, high-curve commanders and
 commander-driven plan shape, feature maths, legality checks, distance and
-mixture properties, blend gating, cut-candidate scoring, staple protection, rank-based quality,
+mixture properties, blend gating, cut-candidate scoring, staple protection, replaceability scoring,
+Game Changer handling,
 advice guards, plus an end-to-end check that each sample deck classifies as
 intended (skipped if the Scryfall cache is empty).
 
@@ -413,6 +460,7 @@ mtgcoach/
   roles.py       the functional role vocabulary and its matching rules
   features.py    descriptive statistics, feature vector, legality checks
   synergy.py     deck-relative theme discovery by tag lift
+  corpus.py      card corpus for replaceability and bracket flags
   archetypes.py  the fourteen reference profiles
   classify.py    distance, softmax mixture, focus, blended target
   advice.py      fundamentals and direction recommendation passes
@@ -423,7 +471,7 @@ tests/           unit and end-to-end tests
 ```
 
 Cached Scryfall data lives in `.cache/mtgcoach/` (override with
-`MTGCOACH_CACHE`). The oracle tag file is about 6 MB and is re-downloaded
+`MTGCOACH_CACHE`): card lookups, the oracle tag index, and the card corpus. The oracle tag file is about 6 MB and is re-downloaded
 every 14 days. The card cache carries a schema version
 (`scryfall.CARD_CACHE_SCHEMA`) - **bump it whenever `_face_aware` extracts a
 new field**, or entries cached by an older build are served without it and the

@@ -123,11 +123,14 @@ class CardEntry(object):
     """One decklist line, resolved against Scryfall."""
 
     __slots__ = ("name", "quantity", "card", "tags", "roles", "is_commander",
-                 "synergy")
+                 "synergy", "replaceability")
 
     def __init__(self, name: str, quantity: int, card: dict,
                  tags: Sequence[str], roles: Set[str], is_commander: bool):
         self.synergy = 0.0
+        # Share of comparable cards that outrank this one; None until a card
+        # corpus is loaded (see mtgcoach.corpus).
+        self.replaceability: Optional[float] = None
         self.name = name
         self.quantity = quantity
         self.card = card
@@ -154,6 +157,10 @@ class CardEntry(object):
     @property
     def edhrec_rank(self):
         return self.card.get("edhrec_rank")
+
+    @property
+    def game_changer(self) -> bool:
+        return bool(self.card.get("game_changer"))
 
     def satisfies(self, condition: Optional[dict]) -> bool:
         """Whether this card is one the commander's ability can actually use."""

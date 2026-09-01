@@ -16,7 +16,7 @@ import sys
 from typing import List, Optional, Sequence
 
 from . import archetypes as archetypes_mod
-from . import advice, classify, decklist, features, report, scryfall
+from . import advice, classify, corpus, decklist, features, report, scryfall
 from .roles import ROLES, card_roles
 
 
@@ -46,6 +46,9 @@ def _load_analysis(path: str, args) -> tuple:
                                      refresh=args.refresh_tags,
                                      progress=progress)
     analysis = features.analyze(parsed, cards, tags)
+    corpus.annotate(analysis, corpus.load(offline=args.offline,
+                                          refresh=getattr(args, "refresh_corpus", False),
+                                          progress=progress))
     return parsed, analysis, label
 
 
@@ -208,6 +211,9 @@ def build_parser() -> argparse.ArgumentParser:
                          help="also write the full analysis as JSON (- for stdout)")
     analyze.add_argument("--profiles", metavar="FILE",
                          help="load archetype profiles produced by 'fit'")
+    analyze.add_argument("--refresh-corpus", action="store_true",
+                         help="rebuild the card corpus used to judge how "
+                              "replaceable each card is")
     analyze.add_argument("--refresh-tags", action="store_true",
                          help="re-download the Scryfall oracle tag data")
     analyze.set_defaults(func=cmd_analyze)

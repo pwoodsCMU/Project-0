@@ -45,7 +45,7 @@ TAGS_MAX_AGE_DAYS = 14
 # Bump whenever _face_aware starts extracting a different set of fields, so
 # entries cached by an older build are discarded rather than silently served
 # without the new data.
-CARD_CACHE_SCHEMA = 2
+CARD_CACHE_SCHEMA = 3
 
 # Same idea for the tag index, which now carries the cosmetic-label set too.
 TAG_CACHE_SCHEMA = 2
@@ -213,6 +213,9 @@ def _face_aware(card: dict) -> dict:
         # How widely the card is played in Commander. Low is popular; the
         # top few hundred are format staples.
         "edhrec_rank": card.get("edhrec_rank"),
+        # On WotC's Commander Brackets "Game Changer" list - a card strong
+        # enough to move a deck into a higher bracket.
+        "game_changer": bool(card.get("game_changer")),
         "layout": card.get("layout", ""),
         "rarity": card.get("rarity", ""),
     }
