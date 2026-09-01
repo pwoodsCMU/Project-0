@@ -58,7 +58,8 @@ cache, then re-run the tests to get real coverage.
 | `corpus.py` | Card corpus for replaceability. **Not wired in — see below** |
 | `report.py` | Terminal and JSON rendering |
 | `cli.py` | Argument parsing and dispatch |
-| `webapp.py` | Local HTTP UI. Stdlib `http.server` only; calls the same functions `cli.cmd_analyze` does and serves exactly `report.to_json()`'s shape (plus `warnings`/`missing_cards`) from `static/index.html`'s vanilla-JS frontend. Keep it a consumer of the JSON contract, not a second implementation of the analysis path. |
+| `webapp.py` | Local HTTP UI (stdlib `http.server` only) — see "Web UI" below |
+| `static/index.html` | The entire frontend: inline CSS + vanilla JS, no build step, no framework |
 
 ## The JSON contract
 
@@ -80,6 +81,16 @@ swap_budget, legality, unresolved
 
 If you change this shape, treat it as a breaking API change.
 
+`webapp.py` layers three extra keys onto that payload before sending it to the
+browser: `warnings` (from `ParsedDeck.warnings`), `missing_cards` (from
+`scryfall.fetch_cards`), and an `image` field added to each entry in
+`cut_candidates` (a Scryfall image URL, looked up from the already-fetched
+card dict — not part of `report.to_json()` itself). If you go looking for
+`image` in `report.py`/`advice.py` and don't find it, that's why — it's
+assembled in `webapp.analyze_deck`, deliberately, so the CLI's JSON output
+stays exactly the documented contract and only the web UI carries the extra
+weight.
+
 ## Caching, and the trap in it
 
 Caches live in `.cache/mtgcoach/` (override with `MTGCOACH_CACHE`): card
@@ -88,8 +99,9 @@ lookups, the oracle tag index (~1.7 MB), the card corpus (~1 MB).
 **The trap:** if you add a field to `scryfall._face_aware`, you must bump
 `CARD_CACHE_SCHEMA`. Otherwise every already-cached card is served without the
 new field and it silently reads as `None` everywhere. This cost real debugging
-time when `edhrec_rank` was added. The same applies to `TAG_CACHE_SCHEMA` and
-`CORPUS_SCHEMA`.
+time when `edhrec_rank` was added, and happened again (correctly handled) when
+`image` was added for the web UI: schema went 3 → 4. The same applies to
+`TAG_CACHE_SCHEMA` and `CORPUS_SCHEMA`.
 
 Other data-layer gotchas, all already handled — don't "fix" them back:
 
@@ -100,6 +112,120 @@ Other data-layer gotchas, all already handled — don't "fix" them back:
   adds 2 to the mana value used for the curve.
 - Negative lookups are deliberately **not** cached, so a name that failed
   because of a bug is retried rather than remembered as missing forever.
+
+## Web UI
+
+`webapp.py` + `static/index.html` is a local desktop-style app on top of the
+CLI's analysis path — added after the CLI existed, so it deliberately does not
+reimplement any analysis logic. It's stdlib-only, same as the rest of the repo
+(no Flask, no npm, no build step).
+
+**Routes** (`webapp.Handler`):
+- `GET /` — serves `static/index.html`.
+- `GET /api/decks` — deck basenames from `decks/*.txt`.
+- `GET /api/archetypes` — `[{key, name, blurb}]` for the target-archetype dropdown.
+- `GET /api/roles` — `[{key, label}]` for the role vocabulary, so the frontend
+  can label role counts without duplicating `roles.py`'s label strings.
+- `POST /api/analyze` — body `{deck_name | deck_text, commander?, target?,
+  blend?, cuts?}`, returns the JSON contract described above (plus the three
+  webapp-only keys).
+
+**Query strings on GET routes are real.** `self.path` from
+`BaseHTTPRequestHandler` includes the query string (`/?deck=world_shaper`), so
+every route comparison in `do_GET` splits on `?` first. This was a real bug
+during development — `self.path == "/"` silently 404'd whenever a query
+string was present. If you add a new `GET` route, split the path the same way.
+
+**`?deck=<name>` on the page itself** preselects and runs that sample deck on
+load (`static/index.html`, bottom of the `<script>`). It exists mainly so the
+UI can be screenshotted/tested headlessly without scripting a click; it also
+works as a shareable link. There's no equivalent for `deck_text` — pasted
+decklists aren't in the URL, deliberately (keeps URLs short and doesn't put
+someone's decklist in browser history/logs).
+
+**Desktop launch.** `serve()` opens the UI in a browser "app mode" window
+(Chrome/Edge/Chromium/Brave, `--app=<url>`, no tabs or address bar) instead of
+a normal tab or a packaged native app — see `_open_app_window`. This was a
+deliberate choice over `pywebview`/Electron: zero new dependencies, in
+exchange for the window being an actual browser process. On macOS it probes
+with `open -Ra "<app name>"` and launches with `open -na`; elsewhere it
+`shutil.which`s a handful of binary names. Falls back to `webbrowser.open` if
+none are found. Don't "simplify" this to always call `webbrowser.open` — that
+was tried first and explicitly rejected for looking like a browser tab, not
+an app.
+
+**Testing.** There are no automated tests for `webapp.py` or
+`static/index.html` — `tests/` only covers the core package. Verification so
+far has been manual: `curl` against the routes, and headless-browser
+screenshots for the frontend, e.g.:
+
+```bash
+python3 -m mtgcoach.webapp --no-browser --port 8765 &
+curl -s -X POST -H "Content-Type: application/json" \
+  -d '{"deck_name":"world_shaper"}' http://127.0.0.1:8765/api/analyze
+"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" \
+  --headless=new --disable-gpu --window-size=1200,2600 \
+  --screenshot=/tmp/mtgcoach.png --virtual-time-budget=8000 \
+  "http://127.0.0.1:8765/?deck=world_shaper"
+```
+
+(Any Chromium-family browser works for the screenshot; adjust the path.) A
+change to the frontend isn't verified until you've actually looked at a
+rendered screenshot — the JS has no build/lint step to catch mistakes early.
+
+**Known gaps, not bugs** — things a UI bug-fix pass will likely notice and
+should not "fix" without checking with the user first, since they're
+unfinished rather than wrong:
+- Partner/co-commanders: the API accepts a `commander` *list*
+  (`decklist.parse_decklist(commander_override=...)` takes several names),
+  but the UI's commander-override field is a single text input that only ever
+  sends a one-element list. Partner decks work fine when the decklist's own
+  `*CMDR*` markers or the leading-block heuristic detect both commanders; the
+  override field just can't name two.
+- `blend` and `cuts` are real `/api/analyze` parameters (control how many
+  archetypes blend into the target profile, and how many cut candidates come
+  back) but aren't exposed as UI controls — the frontend always uses the
+  server-side defaults (`blend=2, cuts=8`).
+- Card images come from the already-fetched card's `image` field
+  (`scryfall._face_aware`, `normal` size, falling back to `small`). Split and
+  adventure cards use the top-level `image_uris`; transform/modal
+  double-faced cards use the front face's. This hasn't been checked against
+  every DFC layout Scryfall has — a cut candidate that's a back-face-heavy
+  card is the likeliest place an image silently comes back `null` (the
+  frontend already handles that: `cut-noimg` renders the card name instead of
+  a broken `<img>`).
+
+**Deliberate UI decisions** — same spirit as the analysis-side ones below,
+don't undo these while "cleaning up":
+- The stat-grid's Ramp/Card draw/Removal/Board wipes tiles (`PILLAR_ROLES` in
+  `static/index.html`) are a **fixed** set, shown regardless of what the deck
+  actually leans on — unlike the "Key roles" panel below them, which is the
+  dynamic top 10 non-zero role counts for *this* deck. Don't merge these two;
+  they answer different questions ("does this deck have the staples every
+  Commander deck needs" vs. "what is this deck actually built on").
+  Also intentional: `PILLAR_ROLES` fixed labels ("Removal") intentionally
+  simplify `roles.py`'s longer labels ("Spot removal / interaction") — leave
+  that if you touch role labels elsewhere.
+- The land-count stat tile's good/warn/bad thresholds
+  (`landGap <= 1 / <= 3 / else`) are a **severity** scale, not a distance
+  scale — the *worse* the deviation from `recommended_lands`, the stronger
+  the color, ending in `--bad` past a gap of 3. An earlier version of this
+  logic left large deviations uncolored (blank fell through past the `warn`
+  check) — worse cases read as calmer than mild ones. If you touch this,
+  check the *worst* case renders the loudest, not the quietest.
+- The cut-candidates view deliberately does **not** show the raw EDHREC rank
+  number (removed on request — a bare number like "9285" isn't meaningful
+  without context). The `edhrec_rank` field is still in the JSON payload for
+  anything else that wants it; just don't resurface it as a plain number in
+  `cutTable()`. The `reason` text and `tier` pill are meant to carry that
+  signal in human terms instead.
+- Recommendations are sorted client-side by priority (`PRIORITY_ORDER`:
+  high/medium/low) before rendering. `advice.all_recommendations` does not
+  return them in priority order (it's grouped by analysis pass — focus notes,
+  then fundamentals, then direction, then the Game Changer note last
+  regardless of its `LOW` priority), so this sort is load-bearing for the UI
+  reading as "most important first". Don't remove it thinking the backend
+  already sorts.
 
 ## Decisions that are deliberate
 
