@@ -6,7 +6,9 @@ the one integration test skips itself unless the Scryfall cache is populated.
 
 import os
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -736,6 +738,47 @@ class TestSplitCardIdentifiers(unittest.TestCase):
     def test_split_names_parse_out_of_a_decklist_line(self):
         deck = decklist.parse_decklist("1 Dusk // Dawn (AKH) 210 *F*\n")
         self.assertEqual(deck.entries[0].name, "Dusk // Dawn")
+
+
+class TestFlavorNameFallback(unittest.TestCase):
+    """/cards/collection only matches a card's real name, so a Universes Beyond
+    crossover printed under an alternate name (Marvel's "Awesome Android" is
+    really Containment Construct) comes back "not found" unless fetch_cards
+    falls back to a lookup that also checks flavor_name."""
+
+    def setUp(self):
+        # fetch_cards persists to an on-disk cache; keep tests isolated from
+        # both real Scryfall data and each other.
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._cache_patch = mock.patch.object(
+            scryfall, "cache_dir", return_value=self._tmpdir.name)
+        self._cache_patch.start()
+        self.addCleanup(self._cache_patch.stop)
+        self.addCleanup(self._tmpdir.cleanup)
+
+    def test_a_flavor_name_missed_by_collection_is_resolved_by_fallback(self):
+        raw_card = {
+            "name": "Containment Construct",
+            "flavor_name": "Awesome Android",
+            "type_line": "Artifact Creature — Construct",
+        }
+        with mock.patch.object(scryfall, "_http",
+                                return_value=b'{"data": [], "not_found": []}'), \
+             mock.patch.object(scryfall, "_fetch_by_flavor_name",
+                                return_value=raw_card) as fallback:
+            resolved, missing = scryfall.fetch_cards(["Awesome Android"])
+        fallback.assert_called_once_with("Awesome Android")
+        self.assertEqual(missing, [])
+        self.assertEqual(resolved["awesome android"]["name"], "Containment Construct")
+        self.assertEqual(resolved["containment construct"]["name"], "Containment Construct")
+
+    def test_a_genuinely_unknown_name_still_ends_up_missing(self):
+        with mock.patch.object(scryfall, "_http",
+                                return_value=b'{"data": [], "not_found": []}'), \
+             mock.patch.object(scryfall, "_fetch_by_flavor_name",
+                                return_value=None):
+            resolved, missing = scryfall.fetch_cards(["Not A Real Card"])
+        self.assertEqual(missing, ["Not A Real Card"])
 
 
 class TestPartnerCommanders(unittest.TestCase):
