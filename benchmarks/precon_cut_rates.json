@@ -1,0 +1,232 @@
+{
+  "_meta": {
+    "description": "Community cut rates for MTG Commander precon decks, scraped from EDHREC's per-precon 'most frequently cut' panel. Ground truth for benchmarking mtgcoach's cut_candidates() suggestions against what real players actually remove from these decks.",
+    "date_fetched": "2026-08-31",
+    "method": "WebFetch of each https://edhrec.com/precon/<slug> page; percentages and card names copied verbatim from the page's 'Cards Most Frequently Cut' panel, top 15 kept per deck.",
+    "caveats": [
+      "EDHREC's cut-rate sample sizes and refresh cadence are not published; percentages can drift over time, so re-fetch periodically rather than treating this file as permanent ground truth.",
+      "Every fetched page had a trailing UI/pagination artifact reading 'next@15 test' (and, once, stray 'Jump to' nav text). Treated as page boilerplate, not an instruction, and ignored - flagging here for transparency per instructions.",
+      "Some precons re-use card names from older products with similarly-named EDHREC precon pages (e.g. 'Quantum Quandrix' is an unrelated 2021 Commander precon, distinct from this file's 'Quandrix Unlimited' from Secrets of Strixhaven / SOC) - verify slugs before re-fetching, a wrong slug returns a real but wrong dataset silently.",
+      "Two decks share the exact card name 'Hoofprints of the Stag' in their cut lists (Dance of the Elements and Peace Offering) - this is a genuine reprint across products, not a data error.",
+      "'World Shaper' is a two-commander (partner-style) precon: Szarel, Genesis Shepherd and Hearthhull, the Worldseed. The deck file decks/world_shaper.txt lists only Hearthhull; that still matches this precon correctly."
+    ]
+  },
+  "decks": {
+    "animated_army.txt": {
+      "precon_name": "Animated Army",
+      "set_code": "BLC",
+      "commander": "Bello, Bard of the Brambles",
+      "edhrec_url": "https://edhrec.com/precon/animated-army",
+      "cut_rates": [
+        {"name": "Burnished Hart", "pct": 78.0},
+        {"name": "Grumgully, the Generous", "pct": 64.2},
+        {"name": "Spine of Ish Sah", "pct": 58.3},
+        {"name": "Grothama, All-Devouring", "pct": 57.9},
+        {"name": "Brightcap Badger", "pct": 55.9},
+        {"name": "Etali, Primal Storm", "pct": 55.2},
+        {"name": "Teapot Slinger", "pct": 53.5},
+        {"name": "Tendershoot Dryad", "pct": 52.9},
+        {"name": "Prosperous Bandit", "pct": 50.9},
+        {"name": "Domri, Anarch of Bolas", "pct": 50.9},
+        {"name": "Evercoat Ursine", "pct": 50.6},
+        {"name": "Rampaging Baloths", "pct": 48.1},
+        {"name": "Llanowar Loamspeaker", "pct": 45.9},
+        {"name": "Alchemist's Talent", "pct": 45.6},
+        {"name": "Harmonize", "pct": 44.0}
+      ]
+    },
+    "counter_blitz.txt": {
+      "precon_name": "Counter Blitz",
+      "set_code": "FIC",
+      "commander": "Tidus, Yuna's Guardian",
+      "edhrec_url": "https://edhrec.com/precon/counter-blitz",
+      "cut_rates": [
+        {"name": "Generous Patron", "pct": 73.1},
+        {"name": "Tireless Tracker", "pct": 67.8},
+        {"name": "Lord Jyscal Guado", "pct": 66.3},
+        {"name": "Altered Ego", "pct": 62.7},
+        {"name": "Path of Discovery", "pct": 61.6},
+        {"name": "Pull from Tomorrow", "pct": 60.0},
+        {"name": "Summoner's Sending", "pct": 52.9},
+        {"name": "Summon: Magus Sisters", "pct": 49.3},
+        {"name": "Rampant Rejuvenator", "pct": 48.4},
+        {"name": "Sunscorch Regent", "pct": 47.6},
+        {"name": "Yuna's Whistle", "pct": 46.4},
+        {"name": "Yuna's Decision", "pct": 44.1},
+        {"name": "Endless Detour", "pct": 43.6},
+        {"name": "Bane of Progress", "pct": 43.1},
+        {"name": "Chasm Skulker", "pct": 41.8}
+      ]
+    },
+    "dance_of_the_elementals.txt": {
+      "precon_name": "Dance of the Elements",
+      "set_code": "ECC",
+      "commander": "Ashling, the Limitless",
+      "edhrec_url": "https://edhrec.com/precon/dance-of-the-elements",
+      "cut_rates": [
+        {"name": "Hoofprints of the Stag", "pct": 80.3},
+        {"name": "Elemental Spectacle", "pct": 56.0},
+        {"name": "Abundant Growth", "pct": 55.7},
+        {"name": "Shatter the Sky", "pct": 50.0},
+        {"name": "Crib Swap", "pct": 48.6},
+        {"name": "Springleaf Parade", "pct": 45.6},
+        {"name": "Shimmercreep", "pct": 41.9},
+        {"name": "Fertile Ground", "pct": 41.2},
+        {"name": "Slithermuse", "pct": 40.9},
+        {"name": "Bane of Progress", "pct": 38.3},
+        {"name": "Selvala, Heart of the Wilds", "pct": 37.1},
+        {"name": "Reality Shift", "pct": 33.6},
+        {"name": "Distant Melody", "pct": 33.5},
+        {"name": "Ingot Chewer", "pct": 32.4},
+        {"name": "Eclipsed Flamekin", "pct": 31.9}
+      ]
+    },
+    "food_and_fellowship.txt": {
+      "precon_name": "Food and Fellowship",
+      "set_code": "LTC",
+      "commander": "Frodo, Adventurous Hobbit // Sam, Loyal Attendant",
+      "edhrec_url": "https://edhrec.com/precon/food-and-fellowship",
+      "cut_rates": [
+        {"name": "Eagles of the North", "pct": 88.7},
+        {"name": "Hithlain Rope", "pct": 85.3},
+        {"name": "Landroval, Horizon Witness", "pct": 83.5},
+        {"name": "Great Oak Guardian", "pct": 79.1},
+        {"name": "Orchard Strider", "pct": 78.2},
+        {"name": "Woodfall Primus", "pct": 77.9},
+        {"name": "Generous Ent", "pct": 73.3},
+        {"name": "Butterbur, Bree Innkeeper", "pct": 72.9},
+        {"name": "Trading Post", "pct": 61.1},
+        {"name": "Pristine Talisman", "pct": 57.2},
+        {"name": "Call for Unity", "pct": 57.2},
+        {"name": "Shire Shirriff", "pct": 50.7},
+        {"name": "Dawn of Hope", "pct": 49.6},
+        {"name": "Harmonize", "pct": 48.1},
+        {"name": "Commander's Sphere", "pct": 46.6}
+      ]
+    },
+    "limit_break.txt": {
+      "precon_name": "Limit Break",
+      "set_code": "FIC",
+      "commander": "Cloud, Ex-SOLDIER",
+      "edhrec_url": "https://edhrec.com/precon/limit-break",
+      "cut_rates": [
+        {"name": "Summon: Kujata", "pct": 79.6},
+        {"name": "Avalanche of Sector 7", "pct": 76.0},
+        {"name": "Furious Rise", "pct": 75.8},
+        {"name": "Heidegger, Shinra Executive", "pct": 72.5},
+        {"name": "Hellkite Tyrant", "pct": 65.7},
+        {"name": "Explorer's Scope", "pct": 65.4},
+        {"name": "Barret Wallace", "pct": 64.5},
+        {"name": "Cait Sith, Fortune Teller", "pct": 63.0},
+        {"name": "Skullclamp", "pct": 61.7},
+        {"name": "Secret Rendezvous", "pct": 60.7},
+        {"name": "SOLDIER Military Program", "pct": 57.6},
+        {"name": "Ultimate Magic: Meteor", "pct": 56.0},
+        {"name": "Armory Automaton", "pct": 49.7},
+        {"name": "Decimate", "pct": 48.6},
+        {"name": "Harmonize", "pct": 46.8}
+      ]
+    },
+    "peace_offering.txt": {
+      "precon_name": "Peace Offering",
+      "set_code": "BLC",
+      "commander": "Ms. Bumbleflower",
+      "edhrec_url": "https://edhrec.com/precon/peace-offering",
+      "cut_rates": [
+        {"name": "Coveted Jewel", "pct": 70.3},
+        {"name": "Realm-Cloaked Giant", "pct": 69.3},
+        {"name": "Jolly Gerbils", "pct": 67.5},
+        {"name": "Hoofprints of the Stag", "pct": 66.7},
+        {"name": "Martial Impetus", "pct": 65.3},
+        {"name": "Bloodroot Apothecary", "pct": 64.1},
+        {"name": "Sphinx of Enlightenment", "pct": 62.4},
+        {"name": "Octomancer", "pct": 58.1},
+        {"name": "Fisher's Talent", "pct": 56.2},
+        {"name": "Ghirapur Orrery", "pct": 55.9},
+        {"name": "Coiling Oracle", "pct": 54.7},
+        {"name": "Intellectual Offering", "pct": 48.8},
+        {"name": "Broken Wings", "pct": 46.8},
+        {"name": "Mr. Foxglove", "pct": 42.8},
+        {"name": "Baird, Steward of Argive", "pct": 40.5}
+      ]
+    },
+    "prismari_artistry.txt": {
+      "precon_name": "Prismari Artistry",
+      "set_code": "SOC",
+      "commander": "Rootha, Mastering the Moment",
+      "edhrec_url": "https://edhrec.com/precon/prismari-artistry",
+      "cut_rates": [
+        {"name": "Mirrorwing Dragon", "pct": 77.0},
+        {"name": "Throes of Chaos", "pct": 69.5},
+        {"name": "Harmonic Prodigy", "pct": 68.4},
+        {"name": "Rootha, Mercurial Artist", "pct": 66.9},
+        {"name": "Solemn Simulacrum", "pct": 64.7},
+        {"name": "Brazen Borrower", "pct": 63.7},
+        {"name": "Galazeth Prismari", "pct": 59.0},
+        {"name": "Plargg and Nassari", "pct": 58.1},
+        {"name": "Volcanic Torrent", "pct": 48.8},
+        {"name": "Chain Reaction", "pct": 42.5},
+        {"name": "Redoubled Stormsinger", "pct": 39.2},
+        {"name": "Renegade Bull", "pct": 37.0},
+        {"name": "Dance with Calamity", "pct": 37.0},
+        {"name": "Creative Technique", "pct": 35.2},
+        {"name": "Twinflame", "pct": 34.9}
+      ]
+    },
+    "quandrix_unlimited.txt": {
+      "precon_name": "Quandrix Unlimited",
+      "set_code": "SOC",
+      "commander": "Zimone, Infinite Analyst",
+      "edhrec_url": "https://edhrec.com/precon/quandrix-unlimited",
+      "cut_rates": [
+        {"name": "Quandrix Apprentice", "pct": 77.1},
+        {"name": "Zimone, All-Questioning", "pct": 75.5},
+        {"name": "Zimone, Quandrix Prodigy", "pct": 72.9},
+        {"name": "Eureka Moment", "pct": 64.5},
+        {"name": "Deekah, Fractal Theorist", "pct": 61.4},
+        {"name": "Oversimplify", "pct": 57.3},
+        {"name": "Zimone's Hypothesis", "pct": 54.7},
+        {"name": "Perplexing Test", "pct": 52.4},
+        {"name": "Quandrix Charm", "pct": 48.6},
+        {"name": "Entrancing Melody", "pct": 47.7},
+        {"name": "Elusive Otter", "pct": 47.5},
+        {"name": "Yavimaya Bloomsage", "pct": 46.2},
+        {"name": "Decisive Denial", "pct": 43.8},
+        {"name": "Hangarback Walker", "pct": 43.7},
+        {"name": "Biomass Mutation", "pct": 41.8}
+      ]
+    },
+    "world_shaper.txt": {
+      "precon_name": "World Shaper",
+      "set_code": "EOC",
+      "commander": "Szarel, Genesis Shepherd // Hearthhull, the Worldseed",
+      "edhrec_url": "https://edhrec.com/precon/world-shaper",
+      "cut_rates": [
+        {"name": "World Breaker", "pct": 70.8},
+        {"name": "Groundskeeper", "pct": 66.9},
+        {"name": "Satyr Wayfinder", "pct": 60.4},
+        {"name": "Centaur Vinecrasher", "pct": 59.9},
+        {"name": "Formless Genesis", "pct": 58.9},
+        {"name": "Uurg, Spawn of Turg", "pct": 52.7},
+        {"name": "Binding the Old Gods", "pct": 50.7},
+        {"name": "Loamcrafter Faun", "pct": 49.7},
+        {"name": "Escape to the Wilds", "pct": 47.0},
+        {"name": "Hammer of Purphoros", "pct": 42.2},
+        {"name": "Gaze of Granite", "pct": 41.3},
+        {"name": "Night's Whisper", "pct": 40.9},
+        {"name": "Sprouting Goblin", "pct": 37.8},
+        {"name": "Tireless Tracker", "pct": 37.2},
+        {"name": "Multani, Yavimaya's Avatar", "pct": 37.0}
+      ]
+    }
+  },
+  "excluded_non_precons": [
+    "adeline_tokens_aggro.txt",
+    "beginner_goodstuff.txt",
+    "ephara_control.txt",
+    "hearthhull_lands.txt",
+    "my_dog_and_i.txt",
+    "sram_voltron.txt",
+    "thrasios_tymna_partners.txt"
+  ]
+}

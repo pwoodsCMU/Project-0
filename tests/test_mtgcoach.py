@@ -1077,13 +1077,6 @@ class TestCorpusReplaceability(unittest.TestCase):
         self.assertIsNone(
             index.better_fraction(["counterspell"], 3.0, 500, 31))
 
-    def test_replaceability_bonus_falls_as_better_options_pile_up(self):
-        best = advice._replaceability_bonus(0.0)
-        middling = advice._replaceability_bonus(0.10)
-        poor = advice._replaceability_bonus(0.50)
-        self.assertGreater(best, middling)
-        self.assertGreater(middling, poor)
-
     def test_annotate_scores_spells_and_skips_lands(self):
         cards_list = [
             card("Forest", cost="", mv=0.0, type_line="Basic Land — Forest"),

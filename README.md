@@ -53,8 +53,7 @@ Other commands:
 | `mtgcoach fit KEY DECK...` | build a new archetype profile by averaging decks |
 
 Useful flags: `--json out.json`, `--offline`, `--top N`, `--roles N`,
-`--blend N`, `--cuts N`, `--profiles FILE`, `--refresh-tags`,
-`--refresh-corpus`, `--no-color`.
+`--blend N`, `--cuts N`, `--profiles FILE`, `--refresh-tags`, `--no-color`.
 
 ## Decklist format
 
@@ -336,39 +335,42 @@ This is the one place the tool names specific cards, and only ever cards the
 player already owns - "what should I cut" has no useful role-level answer. The
 list never runs longer than the number of slots the advice actually needs.
 
-### Replaceability
+### Replaceability: a measured negative result
 
-`edhrec_rank` says how widely a card is played across all of Commander. Used
-directly it answers the wrong question - it reports that Burnished Hart is
-reasonably popular (rank 488), not that better green ramp exists at the same
-cost. What a cut list actually ranks is *replaceability*:
+`edhrec_rank` measures popularity across all of Commander, which answers the
+wrong question for a cut list: it says Burnished Hart is reasonably popular at
+rank 488, not that better green ramp exists at the same cost. The obvious fix
+is *replaceability* - of the cards this deck could cast that do the same job
+at a similar cost, how many are played more?
 
-> of the cards this deck could play that do the same job at a similar cost,
-> how many are played more than this one?
+`corpus.py` implements it. It downloads Scryfall's `oracle-cards` bulk file,
+indexes the ~32,000 Commander-legal ranked cards by role, mana value and
+colour identity (~1 MB gzipped, three seconds to build, 0.05s to reload), and
+scores each card against what the deck could play instead. The scores look
+right by eye: Sol Ring, Cultivate and Beast Within come out at 0.00, Generous
+Ent at 0.20, Teapot Slinger 0.27, Orchard Strider 0.48.
 
-`corpus.py` answers that. It downloads Scryfall's `oracle-cards` bulk file
-once, indexes every Commander-legal card EDHREC ranks - about 32,000 - by
-role, mana value and colour identity, and compares each card in your deck
-against the ones you could actually cast instead. The index is ~1 MB gzipped,
-takes about three seconds to build and reloads in 0.05s; `--refresh-corpus`
-rebuilds it.
+**It made the cut suggestions worse, so it is not wired into scoring.**
+Measured against nine precons:
 
-Measuring how many cards are *better* rather than what fraction a card beats
-matters, because every class has a long tail of unplayable cards that flatters
-anything remotely reasonable. Sol Ring, Cultivate and Beast Within come out at
-0.00; Generous Ent at 0.20, Teapot Slinger at 0.27, Orchard Strider at 0.48 -
-which is the ordering upgrade guides act on. Cut reasons say so in words:
-"about 42% of the cards you could play instead, at this cost and for this job,
-are played more".
-
-This sits alongside the other two quality signals rather than replacing them,
-because each has a distinct job:
-
-| Signal | Answers | Catches |
+| Cut scoring | top-10 | top-15 |
 | --- | --- | --- |
-| Commander condition | can my commander even use this? | Burnished Hart in a Bello deck |
-| Discovered themes | does this serve what the deck is built on? | Unbound Flourishing |
-| Replaceability | is there a better version of this card? | Orchard Strider, Teapot Slinger |
+| EDHREC rank alone | **36/90 (40.0%)** | **46/90 (51.1%)** |
+| Replaceability instead | 35/90 (38.9%) | 41/90 (45.6%) |
+
+A parameter sweep over the whole family `bonus = A - B x fraction` found no
+setting that beat rank alone; the best was 34/90 and 41/90. The sweep is also
+diagnostic: any positive `A` - any reward for being best-in-class - collapses
+the score (at A=1.5 it reaches 16/90), because rewarding well-ranked cards
+protects exactly the popular-but-wrong-for-this-deck cards that upgrade guides
+cut. Burnished Hart sits in the top 4% of its class and is cut by 78% of
+players, and no amount of tuning reconciles those two facts, because its
+problem is not quality at all - the commander cannot use it.
+
+The module is kept because it is tested and works, and the natural next use is
+the other direction: a corpus of "best available card for this role in these
+colours" is what you need to suggest *additions*, which this tool does not yet
+do. It is deliberately not called from the analysis path.
 
 ### Game Changers are a caution, not an endorsement
 
@@ -385,6 +387,17 @@ shield anything from the cut list.
 EDHREC publishes, per preconstructed deck, the share of players who cut each
 card. That is real ground truth for the cut list, so the suggestions were
 measured against it.
+
+`benchmarks/` holds a fixture of those rates for nine precons and a script
+that scores the tool against them:
+
+```bash
+python3 benchmarks/benchmark_cuts.py
+```
+
+Current aggregate: **36/90 (40.0%)** of community top-10 cuts appear in the
+tool's top 10, **46/90 (51.1%)** in its top 15. Per-deck it ranges from 7/10
+on World Shaper down to 2/10 on Counter Blitz.
 
 The first run scored **0 of 10** on the Animated Army precon. Diagnosing that
 one number produced most of the changes above:
@@ -403,6 +416,10 @@ Overlap with the community's most-cut lists after those changes:
 | --- | --- | --- |
 | Animated Army | 0 / 10 | 6 / 10 |
 | Food and Fellowship | 1 / 8 | 3 / 8 |
+
+Two decks were far too few to tune against, which is why the benchmark above
+now covers nine - and why the replaceability experiment was measured rather
+than shipped on the strength of how sensible it looked.
 
 The misses are informative rather than embarrassing. Burnished Hart and Etali,
 Primal Storm are cut by most upgraders but are genuinely strong cards, held
@@ -442,11 +459,11 @@ through popularity.
 python3 -m unittest discover -s tests -v
 ```
 
-91 tests: parsing, split-card identifiers, partner pairing and inference, role
+90 tests: parsing, split-card identifiers, partner pairing and inference, role
 assignment, creature-type concentration, theme discovery by tag lift, {X}
 spell costing, commander weighting, curve allowance, high-curve commanders and
 commander-driven plan shape, feature maths, legality checks, distance and
-mixture properties, blend gating, cut-candidate scoring, staple protection, replaceability scoring,
+mixture properties, blend gating, cut-candidate scoring, staple protection, corpus replaceability,
 Game Changer handling,
 advice guards, plus an end-to-end check that each sample deck classifies as
 intended (skipped if the Scryfall cache is empty).
@@ -460,7 +477,7 @@ mtgcoach/
   roles.py       the functional role vocabulary and its matching rules
   features.py    descriptive statistics, feature vector, legality checks
   synergy.py     deck-relative theme discovery by tag lift
-  corpus.py      card corpus for replaceability and bracket flags
+  corpus.py      card corpus for replaceability (measured, not wired in)
   archetypes.py  the fourteen reference profiles
   classify.py    distance, softmax mixture, focus, blended target
   advice.py      fundamentals and direction recommendation passes

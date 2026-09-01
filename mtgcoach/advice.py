@@ -722,26 +722,6 @@ def _tribe_credit(entry, analysis: DeckAnalysis, wanted: set) -> float:
 QUALITY_PIVOT = 1500.0
 
 
-# Share of a card's comparison class that outranks it, mapped to a score.
-# Calibrated against cards communities keep (Sol Ring 0.00, Cultivate 0.00,
-# Beast Within 0.00) versus cut (Generous Ent 0.20, Teapot Slinger 0.27,
-# Orchard Strider 0.48).
-REPLACEABILITY_BANDS = [
-    (0.02, 1.5),      # nothing better available to this deck
-    (0.06, 0.5),
-    (0.15, -0.3),
-    (0.30, -1.0),
-]
-REPLACEABILITY_FLOOR = -1.8
-
-
-def _replaceability_bonus(fraction: float) -> float:
-    for threshold, score in REPLACEABILITY_BANDS:
-        if fraction < threshold:
-            return score
-    return REPLACEABILITY_FLOOR
-
-
 def _quality_bonus(rank: Optional[int]) -> float:
     """EDHREC rank as a quality proxy, on a log scale.
 
@@ -875,16 +855,8 @@ def cut_candidates(analysis: DeckAnalysis, classification: Classification,
         # How much this card contributes, graded rather than gated. A binary
         # "has at least one wanted role" test passes almost every creature -
         # combat_aggro alone is enough - which left the cut list nearly empty.
-        # Prefer replaceability - how this card compares to what this deck
-        # could play instead - and fall back to a global rank when the card
-        # has no comparison class.
-        if entry.replaceability is not None:
-            quality = _replaceability_bonus(entry.replaceability)
-        else:
-            quality = _quality_bonus(rank)
-
         score = (1.0 * on_plan + shape + 2.0 * synergy_score
-                 - 0.8 * len(redundant_roles) + quality)
+                 - 0.8 * len(redundant_roles) + _quality_bonus(rank))
 
         if (not roles and entry.synergy < synergy_mod.SYNERGY_THRESHOLD
                 and _tribe_credit(entry, analysis, wanted) == 0):
@@ -903,11 +875,7 @@ def cut_candidates(analysis: DeckAnalysis, classification: Classification,
         else:
             tier = "off_plan"
             reason = "contributes least to your %s plan" % plan_name
-        if entry.replaceability is not None and entry.replaceability >= 0.15:
-            reason += ("; about %.0f%% of the cards you could play instead, at "
-                       "this cost and for this job, are played more"
-                       % (100 * entry.replaceability))
-        elif rank is not None and rank > 3000 and tier != "dead":
+        if rank is not None and rank > 3000 and tier != "dead":
             reason += "; it is also among the least played cards here"
 
         scored.append((score, CutCandidate(entry.name, entry.quantity,
