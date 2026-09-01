@@ -181,7 +181,16 @@ function esc(s) {
   return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 }
 
-function statGrid(stats) {
+// Every Commander deck is expected to carry some of these regardless of
+// archetype, unlike the theme-specific roles in the "Key roles" panel below.
+const PILLAR_ROLES = [
+  ['ramp', 'Ramp'],
+  ['card_draw', 'Card draw'],
+  ['removal_spot', 'Removal'],
+  ['removal_mass', 'Board wipes'],
+];
+
+function statGrid(stats, roles) {
   // Lands vs. recommended is the one stat worth a glance-and-know verdict;
   // everything else here is a plain count.
   const landGap = Math.abs(stats.lands - stats.recommended_lands);
@@ -191,6 +200,9 @@ function statGrid(stats) {
     ['Lands (of ' + stats.recommended_lands + ' recommended)', stats.lands, landStatus],
     ['Creatures', stats.creature_count, ''],
   ];
+  for (const [key, label] of PILLAR_ROLES) {
+    items.push([label, (roles[key] && roles[key].count) || 0, '']);
+  }
   return '<div class="stat-grid">' + items.map(([k, v, status]) =>
     `<div class="stat ${status}"><div class="v">${esc(v)}</div><div class="k">${esc(k)}</div></div>`
   ).join('') + '</div>';
@@ -337,7 +349,7 @@ function render(data) {
     <div class="panel">
       <h2>${esc(data.deck || 'Deck')}</h2>
       <p>${esc(commanders)} — color identity ${esc((data.color_identity || []).join('') || 'C')}</p>
-      ${statGrid(data.stats)}
+      ${statGrid(data.stats, data.roles)}
     </div>
     ${warnBlock}
     <div class="panel"><h2>Key roles</h2>${roleList(data.roles)}</div>
