@@ -22,6 +22,7 @@ from typing import Optional, Sequence
 
 from . import advice, archetypes as archetypes_mod, classify, decklist, features
 from . import report, scryfall
+from .roles import ROLES
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DECKS_DIR = os.path.join(REPO_ROOT, "decks")
@@ -43,6 +44,10 @@ def list_decks() -> list:
 def list_archetypes() -> list:
     return [{"key": a.key, "name": a.name, "blurb": a.blurb}
             for a in archetypes_mod.ARCHETYPES]
+
+
+def list_roles() -> list:
+    return [{"key": r.key, "label": r.label} for r in ROLES]
 
 
 def analyze_deck(deck_text: Optional[str] = None, deck_name: Optional[str] = None,
@@ -91,6 +96,9 @@ def analyze_deck(deck_text: Optional[str] = None, deck_name: Optional[str] = Non
                              target=target, cuts=cut_list)
     payload["warnings"] = parsed.warnings
     payload["missing_cards"] = missing
+    for cut in payload["cut_candidates"]:
+        card = cards.get(scryfall.normalize_name(cut["name"]))
+        cut["image"] = card.get("image") if card else None
     return payload
 
 
@@ -116,12 +124,15 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:
-        if self.path == "/" or self.path == "/index.html":
+        path = self.path.split("?", 1)[0]
+        if path == "/" or path == "/index.html":
             self._send_file(os.path.join(STATIC_DIR, "index.html"), "text/html")
-        elif self.path == "/api/decks":
+        elif path == "/api/decks":
             self._send_json({"decks": list_decks()})
-        elif self.path == "/api/archetypes":
+        elif path == "/api/archetypes":
             self._send_json({"archetypes": list_archetypes()})
+        elif path == "/api/roles":
+            self._send_json({"roles": list_roles()})
         else:
             self._send_json({"error": "not found"}, 404)
 

@@ -45,7 +45,7 @@ TAGS_MAX_AGE_DAYS = 14
 # Bump whenever _face_aware starts extracting a different set of fields, so
 # entries cached by an older build are discarded rather than silently served
 # without the new data.
-CARD_CACHE_SCHEMA = 3
+CARD_CACHE_SCHEMA = 4
 
 # Same idea for the tag index, which now carries the cosmetic-label set too.
 TAG_CACHE_SCHEMA = 2
@@ -197,8 +197,13 @@ def _face_aware(card: dict) -> dict:
     for face in faces:
         keywords.extend(face.get("keywords") or [])
 
+    # Split/adventure cards carry one image at top level; transform/modal
+    # double-faced cards carry it per face instead.
+    images = card.get("image_uris") or (faces[0].get("image_uris") if faces else None) or {}
+
     return {
         "name": card.get("name", ""),
+        "image": images.get("normal") or images.get("small"),
         "oracle_id": card.get("oracle_id") or (faces[0].get("oracle_id") if faces else None),
         "mana_cost": mana_cost,
         "mana_value": float(card.get("cmc", 0.0) or 0.0),

@@ -6,8 +6,8 @@
 <style>
   :root {
     --bg: #10131a; --panel: #171b25; --border: #2a2f3d; --text: #e8eaf0;
-    --muted: #8b93a7; --accent: #7aa2ff; --good: #58c774; --warn: #e0b345;
-    --bad: #e05a5a;
+    --muted: #8b93a7; --accent: #3987e5; --track: #0d1017;
+    --good: #0ca30c; --warn: #fab219; --bad: #d03b3b;
   }
   * { box-sizing: border-box; }
   body {
@@ -48,23 +48,69 @@
           padding: 8px 10px; }
   .stat .v { font-size: 18px; font-weight: 600; }
   .stat .k { font-size: 11px; color: var(--muted); }
+  .stat.good .v { color: var(--good); }
+  .stat.warn .v { color: var(--warn); }
+  .stat.bad .v { color: var(--bad); }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); }
   th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; }
-  .bar { display: inline-block; height: 6px; background: var(--accent); border-radius: 3px;
-         vertical-align: middle; }
+  .fit-cell { display: flex; align-items: center; gap: 8px; }
+  .fit-track { flex: 1; max-width: 140px; height: 6px; background: var(--track);
+               border-radius: 3px; overflow: hidden; }
+  .fit-fill { height: 100%; background: var(--accent); border-radius: 3px; }
   .pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px;
           border: 1px solid var(--border); color: var(--muted); }
-  .priority-high { color: var(--bad); }
-  .priority-medium { color: var(--warn); }
+  .pill.priority-high::before, .pill.priority-medium::before,
+  .pill.tier-dead::before, .pill.tier-off_plan::before {
+    content: "●"; font-size: 8px; margin-right: 4px;
+  }
+  .priority-high { color: var(--bad); border-color: var(--bad); }
+  .priority-medium { color: var(--warn); border-color: var(--warn); }
   .priority-low { color: var(--muted); }
-  .rec { border-bottom: 1px solid var(--border); padding: 10px 0; }
+  .tier-dead { color: var(--bad); border-color: var(--bad); }
+  .tier-off_plan { color: var(--warn); border-color: var(--warn); }
+  .tier-redundant { color: var(--muted); }
+  .rec { border-bottom: 1px solid var(--border); padding: 10px 0 10px 10px;
+         border-left: 3px solid var(--border); }
+  .rec.priority-high { border-left-color: var(--bad); }
+  .rec.priority-medium { border-left-color: var(--warn); }
+  .rec.priority-low { border-left-color: var(--border); }
   .rec:last-child { border-bottom: none; }
-  .rec .title { font-weight: 600; }
+  .rec .title { font-weight: 600; color: var(--text); }
   .rec .detail { color: var(--muted); margin-top: 3px; }
   .error { color: var(--bad); padding: 10px 0; }
   .muted { color: var(--muted); }
   #status { color: var(--muted); font-size: 12px; }
+  .curve-chart { display: flex; align-items: flex-end; gap: 6px; }
+  .curve-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .curve-val { font-size: 11px; color: var(--muted); min-height: 14px; }
+  .curve-track { height: 110px; width: 100%; display: flex; align-items: flex-end;
+                 justify-content: center; border-bottom: 1px solid var(--border); }
+  .curve-fill { width: 100%; max-width: 24px; min-height: 2px; background: var(--accent);
+                border-radius: 4px 4px 0 0; }
+  .curve-mv { font-size: 11px; color: var(--muted); }
+  .curve-caption { font-size: 12px; color: var(--muted); margin: 10px 0 0; }
+  .role-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+               gap: 8px 20px; }
+  .role-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+  .role-label { flex: 0 0 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .role-track { flex: 1; height: 6px; background: var(--track); border-radius: 3px;
+                overflow: hidden; }
+  .role-fill { height: 100%; background: var(--accent); border-radius: 3px; }
+  .role-count { width: 22px; text-align: right; color: var(--muted); }
+  .cut-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+              gap: 14px; }
+  .cut-card { background: #0d1017; border: 1px solid var(--border); border-radius: 8px;
+              overflow: hidden; display: flex; flex-direction: column; }
+  .cut-card img { display: block; width: 100%; aspect-ratio: 488 / 680; object-fit: cover; }
+  .cut-noimg { width: 100%; aspect-ratio: 488 / 680; display: flex; align-items: center;
+               justify-content: center; text-align: center; padding: 10px; color: var(--muted);
+               font-size: 12px; background: #14171f; }
+  .cut-body { padding: 8px 10px 10px; }
+  .cut-name { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  .cut-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .cut-reason { font-size: 12px; color: var(--muted); }
+  .attribution { font-size: 11px; color: var(--muted); margin: 10px 0 0; }
 </style>
 </head>
 <body>
@@ -102,10 +148,13 @@
 <script>
 const $ = (id) => document.getElementById(id);
 
+let ROLE_LABELS = {};
+
 async function loadOptions() {
-  const [decks, archetypes] = await Promise.all([
+  const [decks, archetypes, roles] = await Promise.all([
     fetch('/api/decks').then(r => r.json()),
     fetch('/api/archetypes').then(r => r.json()),
+    fetch('/api/roles').then(r => r.json()),
   ]);
   for (const d of decks.decks) {
     const opt = document.createElement('option');
@@ -118,6 +167,7 @@ async function loadOptions() {
     opt.title = a.blurb;
     $('targetSelect').appendChild(opt);
   }
+  for (const r of roles.roles) ROLE_LABELS[r.key] = r.label;
 }
 
 $('deckSelect').addEventListener('change', () => {
@@ -132,17 +182,55 @@ function esc(s) {
 }
 
 function statGrid(stats) {
+  // Lands vs. recommended is the one stat worth a glance-and-know verdict;
+  // everything else here is a plain count.
+  const landGap = Math.abs(stats.lands - stats.recommended_lands);
+  const landStatus = landGap <= 1 ? 'good' : landGap <= 3 ? 'warn' : 'bad';
   const items = [
-    ['Total cards', stats.total_cards], ['Lands', stats.lands],
-    ['Spells', stats.spells], ['Recommended lands', stats.recommended_lands],
-    ['Avg mana value', stats.average_mana_value],
-    ['Effective avg MV', stats.effective_average_mana_value],
-    ['Median MV', stats.median_mana_value],
-    ['Creatures', stats.creature_count], ['X spells', stats.x_spells],
+    ['Total cards', stats.total_cards, ''],
+    ['Lands (of ' + stats.recommended_lands + ' recommended)', stats.lands, landStatus],
+    ['Creatures', stats.creature_count, ''],
   ];
-  return '<div class="stat-grid">' + items.map(([k, v]) =>
-    `<div class="stat"><div class="v">${esc(v)}</div><div class="k">${esc(k)}</div></div>`
+  return '<div class="stat-grid">' + items.map(([k, v, status]) =>
+    `<div class="stat ${status}"><div class="v">${esc(v)}</div><div class="k">${esc(k)}</div></div>`
   ).join('') + '</div>';
+}
+
+function roleList(roles) {
+  const entries = Object.entries(roles || {})
+    .map(([key, r]) => ({key, label: ROLE_LABELS[key] || key, count: r.count}))
+    .filter(e => e.count > 0)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+  if (!entries.length) return '<p class="muted">No standout functional roles.</p>';
+  const max = entries[0].count;
+  return '<div class="role-grid">' + entries.map(e => `
+    <div class="role-row">
+      <span class="role-label">${esc(e.label)}</span>
+      <div class="role-track"><div class="role-fill"
+        style="width:${Math.max(6, Math.round(e.count / max * 100))}%"></div></div>
+      <span class="role-count">${e.count}</span>
+    </div>`).join('') + '</div>';
+}
+
+const CURVE_BUCKETS = ['0', '1', '2', '3', '4', '5', '6', '7+'];
+
+function curveChart(stats) {
+  const curve = stats.curve || {};
+  const max = Math.max(1, ...CURVE_BUCKETS.map(b => curve[b] || 0));
+  const cols = CURVE_BUCKETS.map(b => {
+    const count = curve[b] || 0;
+    const pct = Math.max(2, Math.round((count / max) * 100));
+    return `<div class="curve-col">
+      <div class="curve-val">${count || ''}</div>
+      <div class="curve-track"><div class="curve-fill" style="height:${pct}%"></div></div>
+      <div class="curve-mv">${esc(b)}</div>
+    </div>`;
+  }).join('');
+  return `<div class="curve-chart">${cols}</div>
+    <p class="curve-caption">avg ${stats.average_mana_value.toFixed(2)}
+      · effective ${stats.effective_average_mana_value.toFixed(2)}
+      · median ${stats.median_mana_value.toFixed(2)}</p>`;
 }
 
 function classificationTable(c) {
@@ -150,7 +238,8 @@ function classificationTable(c) {
     const pct = Math.round(m.fit * 100);
     return `<tr>
       <td>${esc(m.name)}</td>
-      <td><span class="bar" style="width:${Math.max(pct, 2)}px"></span> ${pct}%</td>
+      <td><div class="fit-cell"><div class="fit-track">
+        <div class="fit-fill" style="width:${pct}%"></div></div> ${pct}%</div></td>
       <td>${m.theme_support.toFixed(2)}</td>
     </tr>`;
   }).join('');
@@ -159,24 +248,41 @@ function classificationTable(c) {
     <p class="muted">focus ${c.focus.toFixed(2)} · separation ${c.separation.toFixed(2)}</p>`;
 }
 
+const PRIORITY_ORDER = {high: 0, medium: 1, low: 2};
+
 function recommendations(recs) {
   if (!recs.length) return '<p class="muted">No recommendations.</p>';
-  return recs.map(r => `<div class="rec">
+  const sorted = [...recs].sort((a, b) =>
+    (PRIORITY_ORDER[a.priority] ?? 3) - (PRIORITY_ORDER[b.priority] ?? 3));
+  return sorted.map(r => `<div class="rec priority-${esc(r.priority)}">
     <div class="title"><span class="pill priority-${esc(r.priority)}">${esc(r.priority)}</span>
       ${esc(r.title)}</div>
     <div class="detail">${esc(r.detail)}</div>
   </div>`).join('');
 }
 
+const TIER_LABELS = {dead: 'dead weight', off_plan: 'off plan', redundant: 'redundant'};
+
 function cutTable(cuts) {
   if (!cuts.length) return '<p class="muted">No cut candidates.</p>';
-  const rows = cuts.map(c => `<tr>
-    <td>${esc(c.name)}</td><td>${esc(c.mana_value)}</td>
-    <td>${esc(c.tier)}</td><td>${esc(c.reason)}</td>
-    <td class="muted">${c.edhrec_rank ?? '—'}</td>
-  </tr>`).join('');
-  return `<table><thead><tr><th>Card</th><th>MV</th><th>Tier</th><th>Reason</th>
-    <th>EDHREC</th></tr></thead><tbody>${rows}</tbody></table>`;
+  const cards = cuts.map(c => {
+    const art = c.image
+      ? `<img src="${esc(c.image)}" alt="${esc(c.name)}" loading="lazy">`
+      : `<div class="cut-noimg">${esc(c.name)}</div>`;
+    return `<div class="cut-card">
+      ${art}
+      <div class="cut-body">
+        <div class="cut-name">${esc(c.name)}</div>
+        <div class="cut-meta">
+          <span class="pill tier-${esc(c.tier)}">${esc(TIER_LABELS[c.tier] || c.tier)}</span>
+          <span class="muted">MV ${esc(c.mana_value)}</span>
+        </div>
+        <div class="cut-reason">${esc(c.reason)}</div>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="cut-grid">${cards}</div>
+    <p class="attribution">Card images via Scryfall.</p>`;
 }
 
 function themeList(themes) {
@@ -234,6 +340,8 @@ function render(data) {
       ${statGrid(data.stats)}
     </div>
     ${warnBlock}
+    <div class="panel"><h2>Key roles</h2>${roleList(data.roles)}</div>
+    <div class="panel"><h2>Mana curve</h2>${curveChart(data.stats)}</div>
     <div class="panel"><h2>Classification</h2>${classificationTable(data.classification)}</div>
     <div class="panel"><h2>Themes</h2>${themeList(data.themes)}</div>
     <div class="panel"><h2>Recommendations</h2>${recommendations(data.recommendations)}</div>
@@ -242,7 +350,11 @@ function render(data) {
 }
 
 $('analyzeBtn').addEventListener('click', analyze);
-loadOptions();
+loadOptions().then(() => {
+  // ?deck=<name> preselects and runs a sample deck - handy for sharing a link.
+  const deck = new URLSearchParams(location.search).get('deck');
+  if (deck) { $('deckSelect').value = deck; analyze(); }
+});
 </script>
 </body>
 </html>
