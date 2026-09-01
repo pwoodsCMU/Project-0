@@ -36,6 +36,7 @@ python3 -m mtgcoach roles                        # the role vocabulary
 python3 -m mtgcoach card "Beast Within"          # how one card is read
 python3 -m unittest discover -s tests            # 90 tests, ~0.4s
 python3 benchmarks/benchmark_cuts.py             # cut quality vs EDHREC
+python3 -m mtgcoach.webapp                       # local web UI, http://127.0.0.1:8765
 ```
 
 Note: the end-to-end test **skips silently** if the Scryfall cache is empty, so
@@ -57,6 +58,7 @@ cache, then re-run the tests to get real coverage.
 | `corpus.py` | Card corpus for replaceability. **Not wired in — see below** |
 | `report.py` | Terminal and JSON rendering |
 | `cli.py` | Argument parsing and dispatch |
+| `webapp.py` | Local HTTP UI. Stdlib `http.server` only; calls the same functions `cli.cmd_analyze` does and serves exactly `report.to_json()`'s shape (plus `warnings`/`missing_cards`) from `static/index.html`'s vanilla-JS frontend. Keep it a consumer of the JSON contract, not a second implementation of the analysis path. |
 
 ## The JSON contract
 
