@@ -1,21 +1,21 @@
 # mtgcoach
 
-A command-line coach for **Magic: The Gathering Commander** decks, aimed at
-players who can build a working deck but are not sure *why* it underperforms.
+A coaching tool for **Magic: The Gathering Commander** decks, aimed at
+beginner players who want to better identify why their deck is underpreforming.
 
-It does three things:
+It does four things:
 
-1. **Descriptive statistics** - mana curve, land count against a curve-aware
+1. **Descriptive statistics** - mana curve, land count compared to curve
    target, colour pips versus colour sources, type breakdown, and a
-   role-by-role account of what the cards in the deck actually do.
+   role estimate for the decks card makeup.
 2. **Partial classification** - measures the distance from the deck to fourteen
-   archetype reference profiles and reports the result as a *mixture*
-   ("58% Aristocrats, 22% Go-Wide Aggro"), plus a focus score for how
-   committed the deck is to any plan at all.
-3. **Recommendations** - prioritised, role-level advice ("add about four
-   pieces of spot removal", "you need more control"), never specific card
-   names, from two sources: universal fundamentals, and the gap between the
-   deck and the archetypes it is closest to.
+   archetype reference profiles and reports the result. Includes a focus score
+   indicating how committed the deck is to a plan.
+3. **Recommendations** - prioritised advice based on both universal fundamentals
+   and the distance from the closest archetype.
+4. **Potential Cuts** - up to ten cards from the deck that serve the gameplan the
+   least, along with reasoning for the cut. Based on deck synergy, staples, and 
+   card quality.
 
 Python 3.9+, standard library only. Card data comes from
 [Scryfall](https://scryfall.com) and is cached on disk after the first run.
@@ -23,37 +23,8 @@ Python 3.9+, standard library only. Card data comes from
 ## Quick start
 
 ```bash
-python3 -m mtgcoach decks/beginner_goodstuff.txt
+python3 -m mtgcoach.webapp
 ```
-
-```bash
-python3 -m mtgcoach analyze decks/my_deck.txt --commander "Korvold, Fae-Cursed King"
-```
-
-Paste a list straight in:
-
-```bash
-pbpaste | python3 -m mtgcoach analyze -
-```
-
-Building toward a specific plan and want to know what is missing:
-
-```bash
-python3 -m mtgcoach analyze decks/my_deck.txt --target voltron
-```
-
-Other commands:
-
-| Command | What it does |
-| --- | --- |
-| `mtgcoach analyze DECK` | the full report (default; `mtgcoach DECK` also works) |
-| `mtgcoach archetypes` | the fourteen reference profiles and their game plans |
-| `mtgcoach roles` | the functional role vocabulary |
-| `mtgcoach card NAME...` | the Scryfall tags and roles of individual cards |
-| `mtgcoach fit KEY DECK...` | build a new archetype profile by averaging decks |
-
-Useful flags: `--json out.json`, `--offline`, `--top N`, `--roles N`,
-`--blend N`, `--cuts N`, `--profiles FILE`, `--refresh-tags`, `--no-color`.
 
 ## Decklist format
 
@@ -71,387 +42,126 @@ SB: 1 Pithing Needle
 33 Plains
 ```
 
+When copying from moxfield, remember to put a line between your commander(s) 
+and the rest of your decklist!
+
 Quantities, `x` suffixes, set codes, collector numbers and `*F*` foil markers
 are all optional. Sideboard and maybeboard sections are parsed but excluded
 from the analysis. The commander is taken from a `*CMDR*` marker, a
 `Commander` section, `--commander "Name"`, or - failing those - a lone card in
 the first block of a 100-card list.
 
-## How it works
-
-```
-decklist -> Scryfall lookup -> functional roles -> feature vector
-                                                        |
-                          archetype profiles -> weighted distance -> mixture
-                                                        |
-                                     fundamentals + gaps -> recommendations
-```
 
 ### Roles
 
-Every card is labelled with the functional roles it fills - a card can hold
-several at once. The primary signal is **Scryfall Tagger's oracle tags**,
-which are community-curated functional labels (`ramp`, `spot removal`,
-`draw engine`, `sacrifice outlet`) published in Scryfall's `oracle-tags` bulk
-file. Tags form a hierarchy, so `mana dork` and `ritual` both roll up to
-`ramp`; `mtgcoach` flattens each card's tags up that hierarchy, which means a
-role only has to name the parent label to catch every child. Oracle-text and
-type-line patterns act as a backstop for cards Tagger has not reached.
-
-Deliberate detail: land tutors (Rampant Growth) count as **ramp** and not as
-**tutors**, because for deckbuilding purposes they are not the same thing.
-
-The `typal` role deliberately counts *payoffs* only - lords and cards that name
-a creature type. How concentrated the creatures themselves are is a separate
-measurement (below), because a deck can have thirty Elementals and no payoffs,
-or six payoffs and no Elementals, and those need different advice.
-
-`mtgcoach roles` prints the whole vocabulary; `mtgcoach card "Beast Within"`
-shows how a single card was read.
+Every card is labelled with the functional roles it fills, based on
+**Scryfall Tagger's oracle tags**, which are community-curated functional 
+labels (`ramp`, `spot removal`, `draw engine`, `sacrifice outlet`) published
+in Scryfall's `oracle-tags` bulk file. Tags form a hierarchy, so  a role only 
+has to name the parent label to catch every child. Oracle-text and type-line 
+patterns act as a fallback for cards not tagged by the community.
 
 ### Discovered themes
 
-The role vocabulary is a fixed list of about thirty things a card can do. It
-is a good basis for comparing decks *to each other*, but it can only see
-themes somebody named in advance. Unbound Flourishing carries `x cost matters`
-and nothing the vocabulary knows, so in a deck that is half {X} spells it read
-as a card that does nothing - and got proposed as a cut.
-
-So the deck also describes itself. For every Scryfall tag, `synergy.py`
-compares how concentrated it is *in this deck* against how common it is across
-all 36,000 tagged cards:
+The role vocabulary is a fixed list of ~30 things a card can do, so
+it is somewhat limited in which decks it can detect. To rectify this, the
+deck "describes itself": for every Scryfall tag, `synergy.py` compares how
+concentrated it is in this deck vs  how common it is across all tagged cards:
 
 ```
 lift(tag) = share of this deck carrying it / share of all cards carrying it
 ```
 
-A tag with high lift is something the deck is doing on purpose. `x cost
-matters` appears in about one card in a thousand overall and in eight of the
-Quandrix deck's sixty spells - a lift near 200 - so the central theme is found
-without anyone having predicted it. Across the sample decks this surfaces
-`synergy-food`, `group hug`, `typal-elemental`, `synergy-equipment` and
-`counterspell` as the top theme of the deck built on each.
-
-A theme needs at least 3 cards and 2x lift, so a single card is a coincidence
-rather than a plan. Tags describing a card's printing rather than its function
-- reprint cycles, alliterative names, vanilla-ness - are excluded by walking
-the tag hierarchy down from a set of cosmetic roots; without that,
-`cycle-ecc-incarnation` (five cards in one deck, almost nowhere else) looks
-like the strongest theme in the format.
-
-A card's **synergy score** is how much of the deck's theme weight it carries.
-It is used to protect cards the role vocabulary is blind to, and it is
-deck-relative by construction: Sol Ring scores 0.88 in a ramp deck and 0.00 in
-Voltron, which is the honest answer to "is this card doing something *here*".
+A tag needs at least 3 cards and 2x lift to count as a theme, so one card
+isn't mistaken for a plan. Art tags / non-functional tags are excluded. A card's
+**synergy score** is how much of the deck's theme weight it carries.
+ie. Sol Ring scores 0.88 in a ramp deck, 0.00 in Voltron.
 
 ### Feature vector
 
-28 dimensions: 20 role densities plus 8 shape features (creature-type
-concentration, creature share, instant/sorcery share, noncreature permanent
-share, normalised average mana value, cheap-spell share, top-end share, land
-share). Role densities are expressed as a share of the deck's **nonland**
-cards, so decks of slightly different shapes stay comparable.
+28 dimensions: 20 role densities (share of the deck's nonland cards) plus 8
+shape features (creature-type concentration, creature/instant-sorcery/
+noncreature-permanent share, average mana value, cheap-spell/top-end/land
+share).
 
-**{X} spells are counted at a realistic cost.** Scryfall reports `{X}` as
-zero, which makes Fireball a one-drop and Walking Ballista a zero-drop. Nobody
-casts them for X=0, so each `{X}` adds two to the mana value used for the
-curve - otherwise a deck full of mana sinks looks like it has a superb early
-game and gets told the opposite of what it needs.
-
-**Creature-type concentration** is the share of creatures sharing the deck's
-dominant type. Changelings count as whatever the tribe turns out to be, and
-when the commander is a creature - or carries a `typal-<type>` tag - its own
-type gets first refusal on near-ties, so an Elemental commander means the deck
-is measured on Elementals.
-
-**The commander sets the plan.** Whatever it does is on-plan by definition,
-and is never proposed as a trim. That extends to shape: a commander that cares
-about artifacts or enchantments means the deck wants noncreature permanents, a
-typal commander means it wants creature-type concentration. Those are not
-roles any card carries, so without the mapping in
-`advice.COMMANDER_SHAPE_IMPLICATIONS` an artifact commander's deck gets told to
-trim the artifacts it is built on. Shape features that pull against each other
-are blocked in the same pass, so a deck built on permanents is not nudged
-toward instants and sorceries.
-
-**A commander can license a high curve.** Bello, Bard of the Brambles animates
-artifacts and enchantments of mana value 4 or greater; Scryfall tags that as
-`high mana value matters`. When the commander pays you for expensive cards,
-the expensive cards are the plan, and the curve advice steps aside rather than
-telling the player to undo their own deck.
-
-**The commander is weighted up.** It is castable in every single game, so it
-says more about the deck than any one of the other 99 cards; role densities
-count it three times (`features.COMMANDER_WEIGHT`). The descriptive counts in
-the report stay honest at one card. With partners both commanders count, and
-each keeps its own identity - notes about what a commander enables are
-attributed by name rather than merged into one sentence about "your
-commander".
+Commander abilities are weighted higher in the deck's shape, to account for
+their heavy role in the decks plan. They can affect the mana curve evaluation
+if they have a way to cheat out or reduce card costs, and their role densities
+are weighted heaver.
 
 ### Distance and partial classification
 
-Distance to each archetype is a weighted Euclidean distance normalised by the
-total weight, so it reads as a root-mean-square deviation per feature:
+Distance to each archetype is measured as follows:
 
 ```
 d(deck, archetype) = sqrt( sum_i w_i (x_i - c_i)^2 / sum_i w_i )
 ```
 
-Weights (in `features.FEATURE_WEIGHTS`) raise the features that actually
-separate playstyles - counterspells, stax, Equipment - and damp the ones most
-decks carry regardless, like incidental lifegain.
+Distances become affinities through a softmax, giving a distribution over
+archetypes:
 
-Distances become affinities through a softmax with a small temperature, which
-is what makes the classification *partial*: the output is a distribution over
-archetypes rather than a single label. Two derived numbers matter:
-
-- **fit** - how close the best match is in absolute terms, `1 - d/0.20`.
-  A low fit on every archetype means the deck has no recognisable plan.
-- **focus** - one minus the normalised entropy of the affinity distribution.
-  Low focus means the deck is split across plans that may be competing for
-  the same slots.
+- **fit** - how close the best match is, `1 - d/0.20`.
+- **focus** - one minus the normalised entropy of the affinity distribution;
+  low focus means the deck is split across plans that may compete for slots.
 
 ### Archetype profiles
 
-Fourteen hand-authored profiles: Go-Wide Aggro, Voltron, Midrange Value,
-Control, Combo, Stax/Prison, Big Mana, Lands Matter, Aristocrats, Reanimator,
-Spellslinger, +1/+1 Counters, Typal and Group Hug.
-
-Discovered themes also act as archetype evidence. Each profile lists
-`signature_tags` - Scryfall tags that, when they appear among a deck's own
-themes, shorten its distance to that archetype by up to a quarter. It is
-evidence rather than override: a theme moves an archetype up the ranking, it
-does not win from any distance. This lifted fit on every sample deck (Dance of
-the Elementals 52% to 64%, World Shaper 49% to 62%) and moved Prismari
-Artistry off the Midrange Value residual category onto Spellslinger.
-
-They are **expert priors, not fitted parameters**. Each one states only the
-features it takes a position on; everything else falls back to `BASELINE`, a
-typical mid-power deck. That distinction matters downstream: the recommender
-only argues about features an archetype explicitly declares, so a Lands Matter
-deck is never told to add Equipment just because the baseline has some.
-
-The numbers were anchored against the measured exemplar decks in `decks/`, and
-each exemplar classifies as its intended archetype (enforced by the test
-suite). To replace them with your own data:
-
-```bash
-python3 -m mtgcoach fit my_aristocrats decks/a.txt decks/b.txt --out profiles.json
-python3 -m mtgcoach analyze decks/mine.txt --profiles profiles.json
-```
+Fourteen ai-authored profiles, based on common EDH deck types - Go-Wide Aggro, 
+Voltron, Midrange Value, Control, Combo, Stax/Prison, Big Mana, Lands Matter, 
+Aristocrats, Reanimator, Spellslinger, +1/+1 Counters, Typal, Group Hug. 
+They are **expert priors**: each declares only the features it takes a position on, 
+so a Lands Matter deck is never told to add Equipment just because the baseline
+has some. Discovered themes act as supporting evidence via each profile's
+`signature_tags`.
 
 ### Recommendations
 
-Two independent passes, merged and sorted by priority:
+Based on the following in combination:
 
-**Fundamentals** use absolute targets and ignore archetype: land count against
-a curve-aware target (adjusted for cheap ramp, MDFC land backs, and the
-archetype's own appetite for lands), total mana sources, coloured sources
-against coloured pips, card draw, interaction (10-14 answers, of which 6-10
-targeted - board wipes do not answer the resolved permanent already killing
-you), board wipes, curve, and format legality (100 cards, singleton, colour
-identity, commander eligibility, partner pairing).
-
-The early-play check is ramp-aware: a deck with a dozen cheap mana rocks is
-doing something on turns one to three even when few of its spells are cheap,
-so the bar comes down rather than telling a ramp deck to become an aggro one.
-
-Curve advice reads the commander first. A commander that discounts or caps
-casting costs, casts things for free, or puts permanents onto the battlefield
-directly lets the deck support a genuinely higher curve, so the land target and
-the "lower your curve" threshold both work from an **effective** average mana
-value that subtracts that allowance. A deck led by a commander granting
-`evoke {4}` to everything is not playing the same curve as its raw average
-suggests.
-
-**Direction** compares the deck against a blend of its nearest archetypes - or
-against `--target` if you name a goal. The largest weighted gaps become advice,
-converted into "roughly N cards worth" so it is actionable.
-
-The blend is gated on absolute quality, not rank. Every deck has a
-second-nearest archetype, and for a focused deck that runner-up is usually
-junk: a second archetype joins only if it holds at least 15% affinity *and*
-40% fit. A deck that is squarely one thing is measured against that one thing;
-a genuine hybrid keeps both halves.
-
-Guards that keep this from manufacturing work on decks that are already good:
-
-- the noise floor scales with how well the deck already matches - a deck
-  sitting 0.05 from its archetype is not told about 0.03 deviations;
-- "you have too much X" needs a larger gap than "you need more X", and is
-  suppressed entirely for the signature features of the deck's own top
-  matches, and for **anything the commander itself does** - over-investment is
-  usually the deck's identity;
-- ramp, draw, removal and protection are never trimmed.
+- **Fundamentals** use absolute targets and ignore archetype: land count
+  (curve- and archetype-based), mana sources, coloured sources vs. pips,
+  draw, interaction, board wipes, curve, and format legality. 
+- **Direction** compares the deck against a blend of its nearest archetypes
+  (or `--target`). Hybridizes to have a second archetype above 15% affinity
+  and 40% fit.
 
 ### What to cut
 
-A Commander deck is exactly 100 cards, so every "add four of these" is also
-"cut four of those". Advice that only ever adds is advice the player cannot
-act on. The report totals the slots its recommendations want - the **swap
-budget** - and then answers where they come from.
+The report sizes a **swap budget** from its own recommendations, then names
+up to ten cards to cut, ranked in three tiers:
 
-Role-level trims cover part of it. The rest is a ranked list of cards in three
-tiers, because "cut this" means three quite different things:
+1. **Dead weight** - fills no functional role at all.
+2. **Off plan** - useful cards, but not helping towards the deck's plan.
+3. **Redundant** - on plan, but oversaturated in the deck already.
 
-1. **Dead weight** - fills no functional role at all. The vanilla 6/6 with no
-   abilities. Always the first cut.
-2. **Off plan** - does something, but nothing the deck is trying to do.
-3. **Redundant** - on plan, but the deck already has more of that effect than
-   the plan calls for. Ranked most expensive first, since the fifth board wipe
-   should be the priciest one, not the cheapest.
-
-Within every tier the most expensive card goes first. Three rules keep this
-from producing absurd advice:
-
-- **Cards carrying the deck's own themes are protected**, even when they fill
-  no named role - see *Discovered themes* above.
-- **Format staples are never pointed at.** Scryfall carries `edhrec_rank`, a
-  measure of how widely a card is played in Commander: Sol Ring is 1, Arcane
-  Signet 3, Cultivate 20, Farewell 169, against 10421 for Colossal Dreadmaw.
-  Anything inside the top 600 is a staple, and "you have one board wipe too
-  many" is a bad reason to cut the best board wipe ever printed. Staples can
-  still be trimmed at the role level; they are just never the card the tool
-  names.
-- **Universally useful cards are protected.** Ramp, draw, removal, tutors and
-  protection earn their slot in any deck. Without this a synergy score
-  cheerfully recommends cutting Sol Ring for being off-theme. They become
-  cuttable only once the deck is past what *any* deck wants - not merely past
-  what one archetype prefers, or a five-colour deck gets told to cut Cultivate
-  - and then they appear as *redundant*, never as off-plan.
-- **A role never gives up more than its surplus.** If the deck is three board
-  wipes over, three wipes are listed, not every wipe in the deck.
-- **Cost is never held against a card that serves the plan.** An expensive
-  on-plan card is a payoff, not a cut: Kindred Summons costs seven mana and
-  does exactly one thing, and that thing wins a typal game.
-- **Shape credit.** A Big Mana deck declares a big top end, but
-  `top_end_share` is not a role any card can carry, so on role matching alone
-  the finisher the deck exists to cast looks like it contributes nothing.
-  Cards get credit for fitting the shape their plan asks for. Being expensive
-  or being a creature is not itself a contribution, though - only being the
-  right *tribe* can rescue a card that does nothing else.
-
-This is the one place the tool names specific cards, and only ever cards the
-player already owns - "what should I cut" has no useful role-level answer. The
-list never runs longer than the number of slots the advice actually needs.
-
-### Replaceability: a measured negative result
-
-`edhrec_rank` measures popularity across all of Commander, which answers the
-wrong question for a cut list: it says Burnished Hart is reasonably popular at
-rank 488, not that better green ramp exists at the same cost. The obvious fix
-is *replaceability* - of the cards this deck could cast that do the same job
-at a similar cost, how many are played more?
-
-`corpus.py` implements it. It downloads Scryfall's `oracle-cards` bulk file,
-indexes the ~32,000 Commander-legal ranked cards by role, mana value and
-colour identity (~1 MB gzipped, three seconds to build, 0.05s to reload), and
-scores each card against what the deck could play instead. The scores look
-right by eye: Sol Ring, Cultivate and Beast Within come out at 0.00, Generous
-Ent at 0.20, Teapot Slinger 0.27, Orchard Strider 0.48.
-
-**It made the cut suggestions worse, so it is not wired into scoring.**
-Measured against nine precons:
-
-| Cut scoring | top-10 | top-15 |
-| --- | --- | --- |
-| EDHREC rank alone | **36/90 (40.0%)** | **46/90 (51.1%)** |
-| Replaceability instead | 35/90 (38.9%) | 41/90 (45.6%) |
-
-A parameter sweep over the whole family `bonus = A - B x fraction` found no
-setting that beat rank alone; the best was 34/90 and 41/90. The sweep is also
-diagnostic: any positive `A` - any reward for being best-in-class - collapses
-the score (at A=1.5 it reaches 16/90), because rewarding well-ranked cards
-protects exactly the popular-but-wrong-for-this-deck cards that upgrade guides
-cut. Burnished Hart sits in the top 4% of its class and is cut by 78% of
-players, and no amount of tuning reconciles those two facts, because its
-problem is not quality at all - the commander cannot use it.
-
-The module is kept because it is tested and works, and the natural next use is
-the other direction: a corpus of "best available card for this role in these
-colours" is what you need to suggest *additions*, which this tool does not yet
-do. It is deliberately not called from the analysis path.
-
-### Game Changers are a caution, not an endorsement
-
-Scryfall carries a `game_changer` flag for the 53 cards on Wizards' Commander
-Brackets list. It is tempting to treat those as cards to protect. This tool
-does the opposite: they are flagged as a *power-level* note, because a Game
-Changer moves a deck up a bracket, and this tool is aimed at the casual end of
-the format where that is often not what the player wants. Being format-warping
-is never a reason to keep a card here, and the flag deliberately does not
-shield anything from the cut list.
+Within a tier the most expensive card by mana cost is cut first. 
+Cards carrying the deck's discovered themes, format staples
+(`edhrec_rank <= 600`, `advice.STAPLE_RANK`), and universally useful cards
+(ramp, draw, removal, tutors, protection) are all protected.
 
 ### Validation against community upgrade guides
 
-EDHREC publishes, per preconstructed deck, the share of players who cut each
-card. That is real ground truth for the cut list, so the suggestions were
-measured against it.
+`benchmarks/benchmark_cuts.py` scores the cut list against EDHREC's published
+per-card cut rates for nine precons:
 
-`benchmarks/` holds a fixture of those rates for nine precons and a script
-that scores the tool against them:
-
-```bash
-python3 benchmarks/benchmark_cuts.py
-```
-
-Current aggregate: **36/90 (40.0%)** of community top-10 cuts appear in the
-tool's top 10, **46/90 (51.1%)** in its top 15. Per-deck it ranges from 7/10
-on World Shaper down to 2/10 on Counter Blitz.
-
-The first run scored **0 of 10** on the Animated Army precon. Diagnosing that
-one number produced most of the changes above:
-
-| Cause | Evidence | Fix |
-| --- | --- | --- |
-| The plan was invisible to every signal | Bello animates noncreature permanents of mana value 4+, which is not a Scryfall tag, so theme discovery could not find it | Parse the commander's stated condition and treat cards satisfying it as core |
-| Themes found the filler, not the plan | Animated Army's top three themes were `ramp`, `mana producer`, `mana rock`; its 19 actual enablers scored *below* deck-average synergy | Exclude mana and other ubiquitous functions from theme discovery |
-| "On plan" was a yes/no test | `combat_aggro` alone made almost every creature on-plan, so the off-plan tier was nearly empty and only 3 cuts were ever produced | Rank by a graded contribution score instead of gating on tiers |
-| Card quality was barely weighted | The cards communities actually cut sit at ranks of 4,000-12,000 while carrying the theme perfectly well | Make EDHREC rank a log-scaled term rather than a small nudge |
-| Synergy stopped discriminating | In Food and Fellowship nearly every card scores 1.00, because Food is the theme | Standardise synergy within the deck |
-
-Overlap with the community's most-cut lists after those changes:
-
-| Precon | Before | After |
-| --- | --- | --- |
-| Animated Army | 0 / 10 | 6 / 10 |
-| Food and Fellowship | 1 / 8 | 3 / 8 |
-
-Two decks were far too few to tune against, which is why the benchmark above
-now covers nine - and why the replaceability experiment was measured rather
-than shipped on the strength of how sensible it looked.
-
-The misses are informative rather than embarrassing. Burnished Hart and Etali,
-Primal Storm are cut by most upgraders but are genuinely strong cards, held
-back by staple protection - the same rule that stops the tool proposing Sol
-Ring. Spine of Ish Sah satisfies Bello's condition, so the tool defends it.
-And several Food and Fellowship cuts are cards that carry the theme and are
-simply weak, which is a card-quality judgement the tool can only approximate
-through popularity.
+**36/90 (40.0%)** of community top-10 cuts appear in the tool's top 10, 
+**46/90 (51.1%)** in its top 15. 
 
 ## Limitations
 
-- Archetype profiles are priors from one author's judgement. They are anchored
-  to four exemplar decks, not fitted to a corpus of tournament data.
-- Scryfall Tagger coverage is community-driven and uneven, and the oracle-text
-  backstop is regex, so individual cards are occasionally miscategorised. The
-  report says how many cards had no tag data at all.
-- Role density is a count of cards, not a measure of quality or efficiency:
-  ten bad draw spells and ten good ones look identical here. The cut list
-  softens this with EDHREC rank, but rank measures popularity, not power, and
-  a card can be both unpopular and exactly right for your deck.
-- Card quality is approximated from EDHREC rank, which measures how widely a
-  card is played rather than how good it is. Comparing within a deck's own
-  colours, roles and costs corrects much of that - a niche card that is the
-  best available answer scores well even with a poor global rank - but
-  popularity still lags new printings and favours cards legal in more decks.
-  Nothing here can see that two specific cards are redundant with each other.
-- Theme discovery finds *correlation in tags*, not the actual combo. It can
-  tell that a deck is built on {X} spells; it cannot tell that two particular
-  cards win on the spot together.
-- The tool sees a decklist, not a play pattern. It cannot see that two cards
-  combo, that the mana base's untapped ratio is wrong, or that the deck is
-  simply too strong or too weak for its table.
+- Archetype profiles are priors from one author's judgement, anchored to a
+  handful of exemplar decks rather than fitted to a corpus of tournament data.
+- Scryfall Tagger coverage is community-driven and uneven; the oracle-text
+  backstop is regex, so individual cards are occasionally miscategorised.
+- Role density is a count of cards, not a measure of quality or efficiency.
+  The cut list softens this with EDHREC rank, but rank measures popularity,
+  not power.
+- Card quality is approximated from EDHREC rank. Comparing within a deck's
+  own colours, roles and costs corrects much of that, but nothing here can
+  see that two specific cards are redundant with each other.
+- Theme discovery finds correlation in tags, not the actual combo.
+- The tool sees a decklist, not a play pattern - it can't see mana base
+  quality or that a deck is too strong or too weak for its table.
 
 ## Tests
 
@@ -459,14 +169,9 @@ through popularity.
 python3 -m unittest discover -s tests -v
 ```
 
-90 tests: parsing, split-card identifiers, partner pairing and inference, role
-assignment, creature-type concentration, theme discovery by tag lift, {X}
-spell costing, commander weighting, curve allowance, high-curve commanders and
-commander-driven plan shape, feature maths, legality checks, distance and
-mixture properties, blend gating, cut-candidate scoring, staple protection, corpus replaceability,
-Game Changer handling,
-advice guards, plus an end-to-end check that each sample deck classifies as
-intended (skipped if the Scryfall cache is empty).
+92 tests: parsing, role assignment, theme discovery, feature maths, legality
+checks, distance and classification, cut-candidate scoring and its guards,
+corpus replaceability, and sample deck classification.
 
 ## Layout
 
@@ -477,19 +182,18 @@ mtgcoach/
   roles.py       the functional role vocabulary and its matching rules
   features.py    descriptive statistics, feature vector, legality checks
   synergy.py     deck-relative theme discovery by tag lift
-  corpus.py      card corpus for replaceability (measured, not wired in)
   archetypes.py  the fourteen reference profiles
   classify.py    distance, softmax mixture, focus, blended target
-  advice.py      fundamentals and direction recommendation passes
+  advice.py      fundamentals and direction recommendation passes, cut list
+  corpus.py      card corpus for replaceability
   report.py      terminal and JSON rendering
   cli.py         argument parsing and command dispatch
-decks/           exemplar decks plus one deliberately rough beginner deck
+  webapp.py      local web UI server
+  static/        web UI frontend
+decks/           exemplar decks, precons, and test decks
 tests/           unit and end-to-end tests
+benchmarks/      cut-list scoring against EDHREC community cut rates
 ```
 
 Cached Scryfall data lives in `.cache/mtgcoach/` (override with
-`MTGCOACH_CACHE`): card lookups, the oracle tag index, and the card corpus. The oracle tag file is about 6 MB and is re-downloaded
-every 14 days. The card cache carries a schema version
-(`scryfall.CARD_CACHE_SCHEMA`) - **bump it whenever `_face_aware` extracts a
-new field**, or entries cached by an older build are served without it and the
-new data silently reads as missing everywhere.
+`MTGCOACH_CACHE`). The oracle tag file is re-downloaded every 14 days.
