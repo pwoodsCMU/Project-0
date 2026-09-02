@@ -17,18 +17,22 @@ It does four things:
    least, along with reasoning for the cut. Based on deck synergy, staples, and 
    card quality.
 
-Python 3.9+, standard library only. Card data comes from
-[Scryfall](https://scryfall.com) and is cached on disk after the first run.
+Python 3.9+, standard libraries. Card data comes from [Scryfall](https://scryfall.com) and is cached on disk after the first run.
+
+## AI
+This is a vibe-coded project, and as such AI was used extensively in development. AI use is documented in README_ai.md. Additionally, this project contains an AGENTS.md file, that is used to contain context for future AI agent use in development.
 
 ## Quick start
+Open a terminal for the installed folder, then used the following command:
 
 ```bash
 python3 -m mtgcoach.webapp
 ```
+A web app should open, where either a sample deck can be chosen, or a decklist can be pasted following the format listed below.
 
 ## Decklist format
 
-Plain text exports from Moxfield, Archidekt, MTGGoldfish and friends all work:
+Plain text exports from Moxfield, Archidekt, or other deckbuilder apps:
 
 ```
 // Commander
